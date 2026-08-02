@@ -1,66 +1,80 @@
 # SPEC.MD: Authenticated Reverse Proxy Middleware & Admin Dashboard
 
 ## ✅ Confirmed Requirements & Scope
-- **Core Functionality**: A middleware proxy server that authenticates a single admin user via JWT, and routes authorized traffic to specific local ports based on dynamic URL paths.
+- **Core Functionality**: A middleware proxy server that authenticates an Admin (via hardcoded ENV variables) and End-Users (via PostgreSQL Database). Authorized traffic is routed to specific local ports based on dynamic URL paths.
 - **Admin Dashboard**: A secure, server-rendered HTML/JS UI where the admin can view, add, edit, and delete proxy routes.
+- **Desktop Client Integration**: A local Electron app establishes an SSH reverse tunnel to the VPS, mapping local apps to the proxy.
 - **Hot-Reloading**: Changes to proxy routes made in the dashboard take effect instantly without restarting the server.
-- **Storage**: Proxy routes are stored persistently in a lightweight `routes.json` file.
-- **Location**: Deployed on the VPS alongside Nginx Config Manager.
-- **Authentication**: Single hardcoded admin user (username/password) driven by environment variables.
+- **Storage**: Proxy routes are stored persistently in a lightweight `routes.json` file. User data is stored in PostgreSQL.
+- **Location**: Deployed on the VPS via Docker Compose.
 
 ## 🛠 Tech Stack & Dependencies
-- **Runtime**: Node.js
+- **Runtime**: Node.js, Docker
 - **Language**: TypeScript
 - **Web Framework**: Express
+- **Database**: PostgreSQL (via Prisma ORM v7)
 - **Core Libraries**: 
-  - `http-proxy-middleware` (for proxying and websocket support)
+  - `http-proxy-middleware` (for proxying and WebSocket support)
   - `jsonwebtoken` (for issuing and verifying JWTs)
   - `cookie-parser` (to handle JWTs transparently in the browser)
+  - `bcrypt` (for user password hashing)
   - `dotenv` (for loading environment variables)
+- **Client App**: Electron, Node.js `ssh2` library, local TCP socket proxying.
 
 ## 📐 Architecture & Data Flow
 ```mermaid
 sequenceDiagram
-    participant Admin
+    participant EndUser as End User Browser
     participant Nginx as Nginx (VPS)
     participant AuthProxy as Auth Proxy (Node.js)
-    participant RoutesJSON as routes.json
-    participant LocalMachine as Local App (via Tunnel)
+    participant SSHDaemon as sshd (VPS)
+    participant ClientApp as Desktop Client App
+    participant LocalMachine as Local App (e.g. Audio Studio)
 
-    %% Dashboard Management Flow
-    Admin->>AuthProxy: POST /admin/api/routes (Add new port)
-    AuthProxy->>RoutesJSON: Save {"/new": "http://localhost:5000"}
-    AuthProxy-->>Admin: Success (Instant Hot-Reload)
-
+    %% Desktop Client Connection Flow
+    ClientApp->>AuthProxy: POST /api/login (Registers temporary SSH Public Key)
+    ClientApp->>SSHDDaemon: Establish Reverse SSH Tunnel (Bind to 127.0.0.1:port)
+    
     %% Proxy Flow
-    Admin->>Nginx: GET /new
-    Nginx->>AuthProxy: Forward GET /new
+    EndUser->>Nginx: GET /vo
+    Nginx->>AuthProxy: Forward GET /vo
     AuthProxy->>AuthProxy: Verify JWT Cookie
-    AuthProxy->>RoutesJSON: Read mapping for "/new"
-    AuthProxy->>LocalMachine: Proxy request to http://localhost:5000
-    LocalMachine-->>AuthProxy: Return Response
-    AuthProxy-->>Admin: Return Response
+    AuthProxy->>AuthProxy: Read mapping for "/vo" -> http://127.0.0.1:port
+    AuthProxy->>SSHDDaemon: Proxy HTTP/WS request over internal loopback
+    SSHDDaemon->>ClientApp: Forward request via SSH Tunnel
+    ClientApp->>LocalMachine: Forward request to local port
+    LocalMachine-->>ClientApp: Return Response (allowHalfOpen stream)
+    ClientApp-->>AuthProxy: Return Response via Tunnel
+    AuthProxy-->>EndUser: Return Response
 ```
 
 ## 📁 File Structure & Module Breakdown
 ```
 Private_AI/
-├── .env                  # Admin Credentials & Server Port
+├── .env                  # Admin Credentials & Database URL
 ├── routes.json           # Persistent storage for dynamic proxy routes
-├── package.json
-├── tsconfig.json
+├── prisma/
+│   └── schema.prisma     # PostgreSQL User schema
+├── docker-compose.yml    # Orchestrates Auth Proxy & PostgreSQL
+├── Dockerfile            # Container definition for the proxy
+├── client-app/           # Desktop Client Application
+│   ├── main.js           # SSH Tunneling logic
+│   └── src/renderer.js   # Client UI
 └── src/
     ├── index.ts          # Server entry point & global middlewares
     ├── config.ts         # Environment validation
+    ├── db.ts             # Prisma Client singleton
     ├── lib/
     │   └── routeManager.ts # Helper to read/write routes.json instantly
     ├── middleware/
     │   ├── auth.ts       # JWT verification & login redirect logic
-    │   └── dynamicProxy.ts # Custom router that checks routes.json and proxies
+    │   └── dynamicProxy.ts # Singleton proxy intercepting HTTP/WS traffic
     ├── routes/
-    │   └── admin.ts      # API endpoints for the dashboard (GET/POST/DELETE routes)
+    │   ├── admin.ts      # API endpoints for the dashboard
+    │   └── api.ts        # End-user authentication and SSH key registration
     └── views/
         ├── login.html    # Minimalist login UI
+        ├── register.html # End-user registration UI
         └── dashboard.html # Beautiful UI to manage ports
 ```
 
@@ -72,24 +86,17 @@ PORT=4000
 JWT_SECRET=super_secret_random_string
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=securepassword
+DATABASE_URL="postgresql://user:pass@127.0.0.1:5432/auth_proxy"
+VPS_IP=203.57.85.144
 ```
 
-**`routes.json` File Structure**
-```json
-{
-  "/ai": "http://localhost:8080",
-  "/app": "http://localhost:3000"
-}
-```
+## ⚠️ Critical Architecture Decisions & Edge Cases Resolved
+1. **Dynamic Proxy Target Missing**: Handled by falling back to a dummy target (`http://127.0.0.1:65535`) and explicitly catching `ECONNREFUSED` on that port to return a clean 404 response.
+2. **WebSocket Support (`upgrade` events)**: `http-proxy-middleware` cannot intercept WebSockets dynamically inside an Express route. The proxy is implemented as a Singleton and explicitly bound to `server.on('upgrade')`.
+3. **Node.js Idle Timeouts**: Node.js defaults to a 5-second `keepAliveTimeout`. For long-running proxy requests (e.g., TTS Audio Generation), this caused random connection drops. Fixed by increasing server timeouts to 5 minutes (`300000ms`).
+4. **URL Collision with Express Body Parser**: Mounting `express.json()` globally on `/api` caused it to consume the JSON bodies of proxied POST requests. Fixed by passing `express.json()` *only* to specific internal endpoints.
+5. **TCP Half-Open Streams**: Node's TCP socket destroys itself upon receiving an EOF from the client HTTP request, cutting off the backend response. Fixed by enabling `allowHalfOpen: true` on the Desktop client's local socket proxy.
+6. **Prisma v7 Deprecations**: The `--skip-generate` flag is removed in Prisma v7. Startup commands were updated to standard `prisma db push`.
 
-## ⚠️ Risks, Edge Cases & Mitigations
-1. **Dynamic Proxy Target Missing**: If a user goes to a path that isn't in `routes.json` (or tries to hit `/`), the server must gracefully return a 404 or redirect to the dashboard, rather than crashing the proxy middleware.
-2. **Path Rewriting**: As discussed, we will strip the prefix (`/ai`) when proxying to the target so the local app sees the request at its root `/`.
-3. **Admin API Protection**: The `GET /admin`, `POST /admin/api/routes`, etc., MUST be strictly protected by the JWT auth middleware so only the logged-in admin can change routes.
-
-## 💡 Proposed Implementation Steps
-1. **Init**: Setup project, TypeScript, and install dependencies.
-2. **Storage Layer**: Build `routeManager.ts` to safely read/write `routes.json`.
-3. **Auth & Views**: Build the Login UI, Dashboard UI, and JWT authentication middleware.
-4. **Admin API**: Build the Express routes for the dashboard to add/remove ports dynamically.
-5. **Dynamic Proxy**: Build the custom middleware that intercepts requests, checks `routeManager`, and proxies traffic to the correct local port on the fly.
+## 💡 Implementation Complete
+The project has successfully progressed through all design, planning, implementation, and verification phases. The system is actively deployed and fully functional.
