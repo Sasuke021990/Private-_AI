@@ -14,6 +14,7 @@ services:
       - "5432:5432"
 
   auth-proxy:
+    image: auth-proxy-app
     build: .
     container_name: auth-proxy
     restart: unless-stopped
