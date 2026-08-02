@@ -43,4 +43,4 @@ RUN npx prisma generate
 EXPOSE 4000
 
 # Start: auto-migrate DB schema then launch the server
-CMD ["sh", "-c", "npx prisma db push --url \"$DATABASE_URL\" --skip-generate && npm start"]
+CMD ["sh", "-c", "npx prisma db push --url \"$DATABASE_URL\" && npm start"]
