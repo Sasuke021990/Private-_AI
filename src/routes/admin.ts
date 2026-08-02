@@ -2,9 +2,10 @@ import { Router, Request, Response } from 'express';
 import { routeManager } from '../lib/routeManager';
 import { requireAuth } from '../middleware/auth';
 import path from 'path';
-import { jsonParser } from '../index';
+import express from 'express';
 
 export const adminRouter = Router();
+const jsonParser = express.json();
 
 // Protect all /admin routes
 adminRouter.use(requireAuth);

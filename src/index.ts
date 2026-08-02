@@ -14,9 +14,6 @@ const app = express();
 // Cookie parser is safe globally (reads headers only, doesn't touch the body)
 app.use(cookieParser());
 
-// JSON body parser is exported for specific routes that need it
-export const jsonParser = express.json();
-
 // ==========================================
 // 1. Authentication Routes (No Proxy needed)
 // ==========================================
@@ -28,7 +25,7 @@ app.get('/register', (req, res) => {
   res.sendFile(path.resolve(__dirname, '../src/views/register.html'));
 });
 
-app.post('/login', jsonParser, async (req, res) => {
+app.post('/login', express.json(), async (req, res) => {
   const { email, password } = req.body;
 
   // 1. Check if it's the master admin

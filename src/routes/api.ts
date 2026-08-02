@@ -4,9 +4,10 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../db';
 import { config } from '../config';
 import fs from 'fs';
-import { jsonParser } from '../index';
+import express from 'express';
 
 export const apiRouter = Router();
+const jsonParser = express.json();
 
 // End-user Registration
 apiRouter.post('/register', jsonParser, async (req: Request, res: Response): Promise<void> => {
