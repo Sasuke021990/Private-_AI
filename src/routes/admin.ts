@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { routeManager } from '../lib/routeManager';
 import { requireAuth } from '../middleware/auth';
 import path from 'path';
+import { jsonParser } from '../index';
 
 export const adminRouter = Router();
 
@@ -19,7 +20,7 @@ adminRouter.get('/api/routes', (req: Request, res: Response) => {
 });
 
 // API: Add or Update route
-adminRouter.post('/api/routes', (req: Request, res: Response) => {
+adminRouter.post('/api/routes', jsonParser, (req: Request, res: Response) => {
   const { path, target, type } = req.body;
   if (!path || !target) {
     res.status(400).json({ error: 'Path and target are required' });
@@ -40,7 +41,7 @@ adminRouter.post('/api/routes', (req: Request, res: Response) => {
 });
 
 // API: Delete route
-adminRouter.delete('/api/routes', (req: Request, res: Response) => {
+adminRouter.delete('/api/routes', jsonParser, (req: Request, res: Response) => {
   const { path } = req.body;
   if (!path) {
     res.status(400).json({ error: 'Path is required' });

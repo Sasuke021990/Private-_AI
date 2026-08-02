@@ -4,11 +4,12 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../db';
 import { config } from '../config';
 import fs from 'fs';
+import { jsonParser } from '../index';
 
 export const apiRouter = Router();
 
 // End-user Registration
-apiRouter.post('/register', async (req: Request, res: Response): Promise<void> => {
+apiRouter.post('/register', jsonParser, async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: 'Email and password required' });
@@ -37,7 +38,7 @@ apiRouter.post('/register', async (req: Request, res: Response): Promise<void> =
 });
 
 // End-user Login (from Desktop App)
-apiRouter.post('/login', async (req: Request, res: Response): Promise<void> => {
+apiRouter.post('/login', jsonParser, async (req: Request, res: Response): Promise<void> => {
   const { email, password, publicKey } = req.body;
   
   if (!email || !password) {

@@ -14,10 +14,8 @@ const app = express();
 // Cookie parser is safe globally (reads headers only, doesn't touch the body)
 app.use(cookieParser());
 
-// JSON body parser applied ONLY to auth/api routes — NOT globally.
-// Global express.json() would consume the request body stream before
-// http-proxy-middleware can forward it, breaking binary uploads (files, MP3, etc.)
-const jsonParser = express.json();
+// JSON body parser is exported for specific routes that need it
+export const jsonParser = express.json();
 
 // ==========================================
 // 1. Authentication Routes (No Proxy needed)
@@ -71,8 +69,10 @@ app.get('/logout', (req, res) => {
 // ==========================================
 // 2. API & Admin Dashboard
 // ==========================================
-app.use('/api', jsonParser, apiRouter);
-app.use('/admin', jsonParser, adminRouter);
+// We do NOT apply jsonParser here globally because it would intercept
+// any proxied request that happens to start with /api or /admin.
+app.use('/api', apiRouter);
+app.use('/admin', adminRouter);
 
 // ==========================================
 // 3. Dynamic Proxy (Catch-All)
