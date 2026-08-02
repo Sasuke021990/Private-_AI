@@ -46,7 +46,7 @@ app.use('/admin', adminRouter);
 // ==========================================
 // If a user hits a route that isn't /login or /admin, the dynamicProxy intercepts.
 // We apply the requireAuth middleware FIRST so random public traffic gets bounced to /login
-app.use('*', (req, res, next) => {
+app.use((req, res, next) => {
   // We don't want to break the proxy's body streaming, 
   // but express.json() is already above. We only use proxy on undefined routes.
   next();
