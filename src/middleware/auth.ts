@@ -4,6 +4,14 @@ import { config } from '../config';
 
 export const COOKIE_NAME = 'auth_proxy_token';
 
+declare global {
+  namespace Express {
+    interface Request {
+      user?: any;
+    }
+  }
+}
+
 export const requireAuth = (req: Request, res: Response, next: NextFunction): void => {
   const token = req.cookies[COOKIE_NAME];
 
@@ -17,7 +25,8 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
   }
 
   try {
-    jwt.verify(token, config.jwtSecret);
+    const payload = jwt.verify(token, config.jwtSecret);
+    req.user = payload;
     next();
   } catch (error) {
     if (req.path.startsWith('/admin/api')) {

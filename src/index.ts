@@ -6,6 +6,8 @@ import { config } from './config';
 import { adminRouter } from './routes/admin';
 import { requireAuth, COOKIE_NAME } from './middleware/auth';
 import { dynamicProxy } from './middleware/dynamicProxy';
+import { routeManager } from './lib/routeManager';
+import { apiRouter } from './routes/api';
 
 const app = express();
 
@@ -20,10 +22,14 @@ app.get('/login', (req, res) => {
   res.sendFile(path.resolve(__dirname, '../src/views/login.html'));
 });
 
+app.get('/register', (req, res) => {
+  res.sendFile(path.resolve(__dirname, '../src/views/register.html'));
+});
+
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   if (username === config.adminUsername && password === config.adminPassword) {
-    const token = jwt.sign({ user: username }, config.jwtSecret, { expiresIn: '24h' });
+    const token = jwt.sign({ id: 'admin', email: username, role: 'ADMIN' }, config.jwtSecret, { expiresIn: '24h' });
     res.cookie(COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
     res.json({ success: true });
   } else {
@@ -37,8 +43,9 @@ app.get('/logout', (req, res) => {
 });
 
 // ==========================================
-// 2. Admin Dashboard APIs
+// 2. API & Admin Dashboard
 // ==========================================
+app.use('/api', apiRouter);
 app.use('/admin', adminRouter);
 
 // ==========================================
@@ -53,7 +60,9 @@ app.use((req, res, next) => {
 }, requireAuth, dynamicProxy);
 
 // Start Server
-app.listen(config.port, () => {
-  console.log(`🛡️ Auth Proxy Middleware running on port ${config.port}`);
-  console.log(`👉 Dashboard accessible at http://localhost:${config.port}/admin`);
+routeManager.loadRoutes().then(() => {
+  app.listen(config.port, () => {
+    console.log(`🛡️ Auth Proxy Middleware running on port ${config.port}`);
+    console.log(`👉 Dashboard accessible at http://localhost:${config.port}/admin`);
+  });
 });

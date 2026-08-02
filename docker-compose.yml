@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: auth-proxy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: auth_proxy
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  auth-proxy:
+    build: .
+    container_name: auth-proxy
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@127.0.0.1:5432/auth_proxy
+      - JWT_SECRET=super_secret_jwt_key
+    env_file:
+      - .env
+    volumes:
+      - ~/.ssh/authorized_keys:/usr/src/app/authorized_keys
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

@@ -5,3 +5,5 @@ routes.json
 .DS_Store
 .agent/
 *.log
+
+/src/generated/prisma

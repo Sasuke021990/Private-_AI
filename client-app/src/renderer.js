@@ -3,9 +3,8 @@ let currentConfig = {};
 async function loadInitialConfig() {
   currentConfig = await window.api.getConfig();
   
-  if (currentConfig.vpsIp) document.getElementById('vpsIp').value = currentConfig.vpsIp;
-  if (currentConfig.vpsRootPassword) document.getElementById('vpsRootPassword').value = currentConfig.vpsRootPassword;
-  if (currentConfig.dashboardPassword) document.getElementById('dashboardPassword').value = currentConfig.dashboardPassword;
+  document.getElementById('email').value = currentConfig.email || '';
+  document.getElementById('dashboardPassword').value = currentConfig.dashboardPassword || '';
   if (currentConfig.runAtStartup) document.getElementById('runAtStartup').checked = true;
 
   renderActiveTunnels();
@@ -44,7 +43,7 @@ function renderActiveTunnels() {
       e.target.disabled = true;
       
       const payload = {
-        vpsIp: document.getElementById('vpsIp').value,
+        email: document.getElementById('email').value,
         dashboardPassword: document.getElementById('dashboardPassword').value,
         remotePath: path
       };
@@ -63,7 +62,7 @@ function renderActiveTunnels() {
 }
 
 // Save global settings automatically when changed
-const globalInputs = ['vpsIp', 'vpsRootPassword', 'dashboardPassword'];
+const globalInputs = ['dashboardPassword', 'email'];
 globalInputs.forEach(id => {
   document.getElementById(id).addEventListener('change', (e) => {
     currentConfig[id] = e.target.value;
@@ -83,8 +82,7 @@ document.getElementById('quit-btn').addEventListener('click', () => {
 document.getElementById('connect-form').addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  const vpsIp = document.getElementById('vpsIp').value;
-  const vpsRootPassword = document.getElementById('vpsRootPassword').value;
+  const email = document.getElementById('email').value;
   const dashboardPassword = document.getElementById('dashboardPassword').value;
   
   const localPort = document.getElementById('localPort').value;
@@ -101,8 +99,7 @@ document.getElementById('connect-form').addEventListener('submit', async (e) => 
 
   try {
     const response = await window.api.connectTunnel({
-      vpsIp,
-      vpsRootPassword,
+      email,
       dashboardPassword,
       localPort,
       remotePath,

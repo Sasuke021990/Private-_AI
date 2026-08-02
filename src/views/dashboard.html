@@ -70,6 +70,21 @@
                     <!-- Dynamic -->
                 </tbody>
             </table>
+        <div class="card">
+            <h3>Registered Users (Admin Only)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Registered At</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTable">
+                    <!-- Dynamic -->
+                </tbody>
+            </table>
         </div>
     </div>
 
@@ -79,6 +94,29 @@
             if (res.status === 401) { window.location.href = '/login'; return; }
             const data = await res.json();
             renderTable(data);
+        }
+        
+        async function fetchUsers() {
+            const res = await fetch('/admin/api/users');
+            if (res.ok) {
+                const data = await res.json();
+                renderUsersTable(data);
+            }
+        }
+
+        function renderUsersTable(users) {
+            const tbody = document.getElementById('usersTable');
+            tbody.innerHTML = '';
+            for (const user of users) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><code>${user.id.substring(0,8)}...</code></td>
+                    <td>${user.email}</td>
+                    <td><span class="btn" style="padding: 2px 5px; font-size: 10px;">${user.role}</span></td>
+                    <td>${new Date(user.createdAt).toLocaleString()}</td>
+                `;
+                tbody.appendChild(tr);
+            }
         }
 
         function renderTable(routes) {
@@ -125,6 +163,7 @@
         }
 
         fetchRoutes();
+        fetchUsers();
     </script>
 </body>
 </html>

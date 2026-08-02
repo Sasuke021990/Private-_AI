@@ -105,24 +105,45 @@ ipcMain.handle('save-config', (event, newCfg) => {
   return true;
 });
 
+const crypto = require('crypto');
+const SERVER_URL = 'http://203.57.85.144:4000';
+
 ipcMain.handle('connect-tunnel', async (event, config) => {
   try {
-    // 1. Authenticate with Dashboard
-    const authRes = await fetch(`http://${config.vpsIp}:4000/login`, {
+    // 1. Generate SSH Keypair
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+    });
+    // ssh2 accepts PEM private keys, but the server authorized_keys needs OpenSSH format.
+    // crypto module can generate OpenSSH public keys in newer Node, but let's use ssh2-streams or crypto if possible.
+    // Actually, node's crypto can export OpenSSH format since Node 16.
+    const { publicKey: pubKeyOpenSSH } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'openssh' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+    });
+
+    // 2. Authenticate and register key
+    const authRes = await fetch(`${SERVER_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: 'admin',
-        password: config.dashboardPassword
+        email: config.email,
+        password: config.dashboardPassword,
+        publicKey: pubKeyOpenSSH
       })
     });
 
-    if (!authRes.ok) throw new Error('Dashboard login failed. Check credentials.');
+    if (!authRes.ok) throw new Error('Login failed. Check credentials.');
     
     const setCookie = authRes.headers.get('set-cookie');
+    const authData = await authRes.json();
+    const vpsIp = authData.vpsIp;
 
-    // 2. Add Route to Dashboard
-    const routeRes = await fetch(`http://${config.vpsIp}:4000/admin/api/routes`, {
+    // 3. Add Route to Dashboard
+    const routeRes = await fetch(`${SERVER_URL}/admin/api/routes`, {
       method: 'POST',
       redirect: 'error',
       headers: { 
@@ -138,14 +159,10 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
 
     if (!routeRes.ok) throw new Error('Failed to add route to dashboard.');
 
-    // 3. Establish SSH Tunnel
+    // 4. Establish SSH Tunnel using Private Key
     return new Promise((resolve, reject) => {
       const conn = new Client();
       
-      conn.on('keyboard-interactive', (name, instructions, instructionsLang, prompts, finish) => {
-        finish([config.vpsRootPassword]);
-      });
-
       conn.on('ready', () => {
         conn.forwardIn('127.0.0.1', parseInt(config.localPort), (err, port) => {
           if (err) {
@@ -153,17 +170,14 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
             return reject(err.message);
           }
           
-          // Save active connection
-          activeTunnels.set(config.remotePath, conn);
+          activeTunnels.set(config.remotePath, { conn, setCookie });
 
-          // Update config to persist this route
           const cfg = loadConfig();
           const routeExists = cfg.activeRoutes.find(r => r.remotePath === config.remotePath);
           if (!routeExists) {
             cfg.activeRoutes.push({ localPort: config.localPort, remotePath: config.remotePath, routeType: config.routeType });
             saveConfig(cfg);
           }
-
           resolve({ success: true, message: 'Connected!' });
         });
       }).on('tcp connection', (info, accept, reject) => {
@@ -176,11 +190,10 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
       }).on('error', (err) => {
         reject('SSH Error: ' + err.message);
       }).connect({
-        host: config.vpsIp,
+        host: vpsIp,
         port: 22,
         username: 'root',
-        password: config.vpsRootPassword,
-        tryKeyboard: true
+        privateKey: privateKey // Use generated private key! No passwords!
       });
     });
 
@@ -191,28 +204,22 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
 
 ipcMain.handle('disconnect-tunnel', async (event, config) => {
   try {
-    const conn = activeTunnels.get(config.remotePath);
-    if (conn) {
-      conn.end();
+    const tunnelData = activeTunnels.get(config.remotePath);
+    if (tunnelData) {
+      tunnelData.conn.end();
+      
+      // Use stored cookie to delete route
+      try {
+        await fetch(`${SERVER_URL}/admin/api/routes`, {
+          method: 'DELETE',
+          redirect: 'error',
+          headers: { 'Content-Type': 'application/json', 'Cookie': tunnelData.setCookie },
+          body: JSON.stringify({ path: config.remotePath })
+        });
+      } catch (err) {}
+
       activeTunnels.delete(config.remotePath);
     }
-
-    // Authenticate and delete route from dashboard
-    const authRes = await fetch(`http://${config.vpsIp}:4000/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: config.dashboardPassword })
-    });
-    if (!authRes.ok) throw new Error('Auth failed during disconnect');
-    
-    const setCookie = authRes.headers.get('set-cookie');
-    
-    await fetch(`http://${config.vpsIp}:4000/admin/api/routes`, {
-      method: 'DELETE',
-      redirect: 'error',
-      headers: { 'Content-Type': 'application/json', 'Cookie': setCookie },
-      body: JSON.stringify({ path: config.remotePath })
-    });
 
     // Remove from saved config
     const cfg = loadConfig();

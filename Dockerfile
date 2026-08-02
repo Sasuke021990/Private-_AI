@@ -7,8 +7,13 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 RUN npm install
 
-# Copy source code and build it
+# Copy source code and Prisma schema
 COPY . .
+
+# Generate Prisma Client (needed for TS compilation and runtime)
+RUN npx prisma generate
+
+# Build TypeScript code
 RUN npm run build
 
 # Stage 2: Production environment
@@ -27,9 +32,10 @@ COPY --from=builder /usr/src/app/dist ./dist
 # Since outDir is dist, we ensure views exist relative to the build
 COPY --from=builder /usr/src/app/src/views ./src/views
 
-# Ensure a default routes.json exists inside the container so it doesn't crash 
-# if the host volume mapping fails or is missing initially.
-RUN echo "{}" > routes.json
+# Copy the prisma client generated files and schema
+COPY --from=builder /usr/src/app/prisma ./prisma
+COPY --from=builder /usr/src/app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /usr/src/app/prisma.config.ts ./prisma.config.ts
 
 # Expose the default port
 EXPOSE 4000

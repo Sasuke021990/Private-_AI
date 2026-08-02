@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuthProxy - Register</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-box {
+            background: #1e293b;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 { color: #38bdf8; text-align: center; margin-top: 0; }
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; color: #94a3b8; }
+        input {
+            width: 100%; padding: 0.75rem; border-radius: 4px;
+            border: 1px solid #334155; background: #0f172a; color: white;
+            box-sizing: border-box;
+        }
+        .btn {
+            background: #38bdf8; color: #0f172a; border: none; width: 100%;
+            padding: 0.75rem; border-radius: 4px; cursor: pointer; font-weight: bold;
+            margin-top: 1rem;
+        }
+        .error { color: #ef4444; text-align: center; margin-top: 1rem; display: none; }
+        .link { text-align: center; margin-top: 1rem; }
+        .link a { color: #38bdf8; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h1>Create Account</h1>
+        <form id="registerForm">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="email" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" required>
+            </div>
+            <button type="submit" class="btn">Register</button>
+        </form>
+        <div id="error" class="error"></div>
+        <div class="link">
+            <a href="/login">Already have an account? Login here</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorEl = document.getElementById('error');
+            
+            try {
+                const res = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                if (res.ok) {
+                    window.location.href = '/admin'; // Wait, regular users don't have dashboard yet
+                } else {
+                    const data = await res.json();
+                    errorEl.innerText = data.error || 'Registration failed';
+                    errorEl.style.display = 'block';
+                }
+            } catch (err) {
+                errorEl.innerText = 'Network error';
+                errorEl.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

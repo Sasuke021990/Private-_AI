@@ -31,8 +31,12 @@ adminRouter.post('/api/routes', (req: Request, res: Response) => {
     return;
   }
 
-  routeManager.addRoute(path, target, type === 'app' ? 'app' : 'api');
-  res.json({ success: true, routes: routeManager.getRoutes() });
+  // Only ADMIN can assign arbitrary user IDs, otherwise use own ID
+  const userId = req.user.role === 'ADMIN' ? (req.body.userId || req.user.id) : req.user.id;
+
+  routeManager.addRoute(path, target, type === 'app' ? 'app' : 'api', userId)
+    .then(() => res.json({ success: true, routes: routeManager.getRoutes() }))
+    .catch(err => res.status(500).json({ error: err.message }));
 });
 
 // API: Delete route
@@ -43,6 +47,22 @@ adminRouter.delete('/api/routes', (req: Request, res: Response) => {
     return;
   }
 
-  routeManager.deleteRoute(path);
-  res.json({ success: true, routes: routeManager.getRoutes() });
+  // Security: only allow deleting own routes or if ADMIN
+  const route = routeManager.getRouteConfig(path);
+  if (route && route.userId !== req.user.id && req.user.role !== 'ADMIN') {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+
+  routeManager.deleteRoute(path)
+    .then(() => res.json({ success: true, routes: routeManager.getRoutes() }))
+    .catch(err => res.status(500).json({ error: err.message }));
+});
+
+import { prisma } from '../db';
+// API: Get Users (ADMIN ONLY)
+adminRouter.get('/api/users', async (req: Request, res: Response) => {
+  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+  const users = await prisma.user.findMany({ select: { id: true, email: true, role: true, createdAt: true }});
+  res.json(users);
 });
