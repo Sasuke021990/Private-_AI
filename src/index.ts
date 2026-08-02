@@ -26,15 +26,37 @@ app.get('/register', (req, res) => {
   res.sendFile(path.resolve(__dirname, '../src/views/register.html'));
 });
 
-app.post('/login', (req, res) => {
-  const { username, password } = req.body;
-  if (username === config.adminUsername && password === config.adminPassword) {
-    const token = jwt.sign({ id: 'admin', email: username, role: 'ADMIN' }, config.jwtSecret, { expiresIn: '24h' });
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  // 1. Check if it's the master admin
+  if (email === config.adminUsername && password === config.adminPassword) {
+    const token = jwt.sign({ id: 'admin', email, role: 'ADMIN' }, config.jwtSecret, { expiresIn: '24h' });
     res.cookie(COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ error: 'Invalid credentials' });
+    res.json({ success: true, redirect: '/admin' });
+    return;
   }
+
+  // 2. Check registered users in the database
+  try {
+    const { prisma } = await import('./db');
+    const bcrypt = await import('bcrypt');
+    const user = await prisma.user.findUnique({ where: { email } });
+    
+    if (user && await bcrypt.compare(password, user.passwordHash)) {
+      const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: '24h' });
+      res.cookie(COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+      
+      // Admin goes to /admin, regular users go to a success page
+      const redirect = user.role === 'ADMIN' ? '/admin' : '/login?success=1';
+      res.json({ success: true, redirect });
+      return;
+    }
+  } catch (err) {
+    console.error('DB login check failed:', err);
+  }
+
+  res.status(401).json({ error: 'Invalid credentials' });
 });
 
 app.get('/logout', (req, res) => {

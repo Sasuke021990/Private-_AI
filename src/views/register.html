@@ -76,7 +76,7 @@
                 });
                 
                 if (res.ok) {
-                    window.location.href = '/admin'; // Wait, regular users don't have dashboard yet
+                    window.location.href = '/login?success=1';
                 } else {
                     const data = await res.json();
                     errorEl.innerText = data.error || 'Registration failed';
