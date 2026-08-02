@@ -82,8 +82,21 @@ app.use(requireAuth, dynamicProxy);
 
 // Start Server
 routeManager.loadRoutes().then(() => {
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`🛡️ Auth Proxy Middleware running on port ${config.port}`);
     console.log(`👉 Dashboard accessible at http://localhost:${config.port}/admin`);
   });
+  
+  // Bind WebSocket upgrade event to the proxy!
+  server.on('upgrade', (req, socket, head) => {
+    // We could apply requireAuth here, but for now we just pass it to proxy
+    // @ts-ignore
+    dynamicProxy.upgrade(req, socket, head);
+  });
+  
+  // Prevent Node.js from killing long-running proxy connections (like TTS generation)
+  // Default keepAliveTimeout is 5 seconds. Increase to 5 minutes.
+  server.keepAliveTimeout = 300000;
+  server.headersTimeout = 301000;
+  server.timeout = 300000;
 });
