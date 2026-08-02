@@ -1,7 +1,12 @@
 import fs from 'fs';
 import { config } from '../config';
 
-export type ProxyRoutes = Record<string, string>;
+export interface RouteConfig {
+  target: string;
+  type: 'app' | 'api';
+}
+
+export type ProxyRoutes = Record<string, RouteConfig | string>;
 
 export class RouteManager {
   private routes: ProxyRoutes = {};
@@ -34,11 +39,20 @@ export class RouteManager {
     if (matchingPaths.length === 0) return null;
 
     matchingPaths.sort((a, b) => b.length - a.length);
-    return this.routes[matchingPaths[0]];
+    const route = this.routes[matchingPaths[0]];
+    if (typeof route === 'string') return route;
+    return route.target;
   }
 
-  public addRoute(path: string, target: string): void {
-    this.routes[path] = target;
+  public getRouteConfig(path: string): RouteConfig | null {
+    const route = this.routes[path];
+    if (!route) return null;
+    if (typeof route === 'string') return { target: route, type: 'api' };
+    return route;
+  }
+
+  public addRoute(path: string, target: string, type: 'app' | 'api' = 'api'): void {
+    this.routes[path] = { target, type };
     this.saveRoutes();
   }
 

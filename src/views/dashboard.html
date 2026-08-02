@@ -84,11 +84,15 @@
         function renderTable(routes) {
             const tbody = document.getElementById('routesTable');
             tbody.innerHTML = '';
-            for (const [path, target] of Object.entries(routes)) {
+            for (const [path, routeObj] of Object.entries(routes)) {
+                const targetUrl = typeof routeObj === 'string' ? routeObj : routeObj.target;
+                const routeType = typeof routeObj === 'string' ? 'api' : routeObj.type;
+                const badgeStyle = routeType === 'app' ? 'background: #3b82f6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;' : 'background: #8b5cf6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;';
+                
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td><code>${path}</code></td>
-                    <td><code>${target}</code></td>
+                    <td><code>${path}</code> <span style="${badgeStyle}">${routeType.toUpperCase()}</span></td>
+                    <td><code>${targetUrl}</code></td>
                     <td><button class="btn btn-danger" onclick="deleteRoute('${path}')">Delete</button></td>
                 `;
                 tbody.appendChild(tr);

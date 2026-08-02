@@ -20,7 +20,7 @@ adminRouter.get('/api/routes', (req: Request, res: Response) => {
 
 // API: Add or Update route
 adminRouter.post('/api/routes', (req: Request, res: Response) => {
-  const { path, target } = req.body;
+  const { path, target, type } = req.body;
   if (!path || !target) {
     res.status(400).json({ error: 'Path and target are required' });
     return;
@@ -31,7 +31,7 @@ adminRouter.post('/api/routes', (req: Request, res: Response) => {
     return;
   }
 
-  routeManager.addRoute(path, target);
+  routeManager.addRoute(path, target, type === 'app' ? 'app' : 'api');
   res.json({ success: true, routes: routeManager.getRoutes() });
 });
 
