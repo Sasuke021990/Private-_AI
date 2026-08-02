@@ -110,20 +110,10 @@ const SERVER_URL = 'http://203.57.85.144:4000';
 
 ipcMain.handle('connect-tunnel', async (event, config) => {
   try {
-    // 1. Generate SSH Keypair
-    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
-      modulusLength: 2048,
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-    });
-    // ssh2 accepts PEM private keys, but the server authorized_keys needs OpenSSH format.
-    // crypto module can generate OpenSSH public keys in newer Node, but let's use ssh2-streams or crypto if possible.
-    // Actually, node's crypto can export OpenSSH format since Node 16.
-    const { publicKey: pubKeyOpenSSH } = crypto.generateKeyPairSync('rsa', {
-      modulusLength: 2048,
-      publicKeyEncoding: { type: 'spki', format: 'openssh' },
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-    });
+    // 1. Generate SSH Keypair using ssh2 utils instead of crypto 
+    // This avoids the 'openssh' format error in Electron's older Node version
+    const { utils } = require('ssh2');
+    const { private: privateKey, public: pubKeyOpenSSH } = utils.generateKeyPairSync('rsa', { bits: 2048 });
 
     // 2. Authenticate and register key
     const authRes = await fetch(`${SERVER_URL}/api/login`, {

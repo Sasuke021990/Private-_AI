@@ -11,9 +11,13 @@ import { apiRouter } from './routes/api';
 
 const app = express();
 
-// Parsers for auth & API
+// Cookie parser is safe globally (reads headers only, doesn't touch the body)
 app.use(cookieParser());
-app.use(express.json());
+
+// JSON body parser applied ONLY to auth/api routes — NOT globally.
+// Global express.json() would consume the request body stream before
+// http-proxy-middleware can forward it, breaking binary uploads (files, MP3, etc.)
+const jsonParser = express.json();
 
 // ==========================================
 // 1. Authentication Routes (No Proxy needed)
@@ -26,7 +30,7 @@ app.get('/register', (req, res) => {
   res.sendFile(path.resolve(__dirname, '../src/views/register.html'));
 });
 
-app.post('/login', async (req, res) => {
+app.post('/login', jsonParser, async (req, res) => {
   const { email, password } = req.body;
 
   // 1. Check if it's the master admin
@@ -67,19 +71,14 @@ app.get('/logout', (req, res) => {
 // ==========================================
 // 2. API & Admin Dashboard
 // ==========================================
-app.use('/api', apiRouter);
-app.use('/admin', adminRouter);
+app.use('/api', jsonParser, apiRouter);
+app.use('/admin', jsonParser, adminRouter);
 
 // ==========================================
 // 3. Dynamic Proxy (Catch-All)
 // ==========================================
-// If a user hits a route that isn't /login or /admin, the dynamicProxy intercepts.
-// We apply the requireAuth middleware FIRST so random public traffic gets bounced to /login
-app.use((req, res, next) => {
-  // We don't want to break the proxy's body streaming, 
-  // but express.json() is already above. We only use proxy on undefined routes.
-  next();
-}, requireAuth, dynamicProxy);
+// Proxy catch-all: NO body parser here so binary streams pass through untouched
+app.use(requireAuth, dynamicProxy);
 
 // Start Server
 routeManager.loadRoutes().then(() => {
