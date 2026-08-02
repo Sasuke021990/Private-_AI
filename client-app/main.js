@@ -176,7 +176,15 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
           localSocket.pipe(stream);
           stream.pipe(localSocket);
         });
+
+        // Make sure streams properly close each other to prevent hanging
+        localSocket.on('close', () => stream.end());
+        localSocket.on('end', () => stream.end());
         localSocket.on('error', () => stream.end());
+        
+        stream.on('close', () => localSocket.destroy());
+        stream.on('end', () => localSocket.end());
+        stream.on('error', () => localSocket.destroy());
       }).on('error', (err) => {
         reject('SSH Error: ' + err.message);
       }).connect({
