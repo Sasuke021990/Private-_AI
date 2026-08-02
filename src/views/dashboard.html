@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auth Proxy - Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            margin: 0; padding: 2rem;
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { color: #38bdf8; border-bottom: 1px solid #334155; padding-bottom: 1rem; }
+        .card {
+            background: #1e293b;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #334155; }
+        th { color: #94a3b8; }
+        .btn {
+            background: #38bdf8; color: #0f172a; border: none;
+            padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: bold;
+        }
+        .btn-danger { background: #ef4444; color: white; }
+        .form-row { display: flex; gap: 1rem; align-items: flex-end; }
+        .form-group { flex: 1; }
+        label { display: block; font-size: 0.875rem; margin-bottom: 0.5rem; color: #94a3b8; }
+        input {
+            width: 100%; padding: 0.75rem; border-radius: 4px;
+            border: 1px solid #334155; background: #0f172a; color: white;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Proxy Routes Dashboard</h1>
+        
+        <div class="card">
+            <h3>Add New Route</h3>
+            <form id="addRouteForm" class="form-row">
+                <div class="form-group">
+                    <label>Path (e.g. /ai)</label>
+                    <input type="text" id="path" placeholder="/app" required>
+                </div>
+                <div class="form-group">
+                    <label>Target (e.g. http://localhost:8080)</label>
+                    <input type="url" id="target" placeholder="http://localhost:3000" required>
+                </div>
+                <button type="submit" class="btn">Add / Update Route</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h3>Active Routes</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Path</th>
+                        <th>Target</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="routesTable">
+                    <!-- Dynamic -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function fetchRoutes() {
+            const res = await fetch('/admin/api/routes');
+            if (res.status === 401) { window.location.href = '/login'; return; }
+            const data = await res.json();
+            renderTable(data);
+        }
+
+        function renderTable(routes) {
+            const tbody = document.getElementById('routesTable');
+            tbody.innerHTML = '';
+            for (const [path, target] of Object.entries(routes)) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><code>${path}</code></td>
+                    <td><code>${target}</code></td>
+                    <td><button class="btn btn-danger" onclick="deleteRoute('${path}')">Delete</button></td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        document.getElementById('addRouteForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const path = document.getElementById('path').value;
+            const target = document.getElementById('target').value;
+            
+            await fetch('/admin/api/routes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path, target })
+            });
+            fetchRoutes();
+            document.getElementById('addRouteForm').reset();
+        });
+
+        async function deleteRoute(path) {
+            if (confirm(`Remove route ${path}?`)) {
+                await fetch('/admin/api/routes', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path })
+                });
+                fetchRoutes();
+            }
+        }
+
+        fetchRoutes();
+    </script>
+</body>
+</html>
