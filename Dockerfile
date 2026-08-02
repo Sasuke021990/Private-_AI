@@ -42,5 +42,5 @@ RUN npx prisma generate
 # Expose the default port
 EXPOSE 4000
 
-# Start the compiled application
-CMD ["npm", "start"]
+# Start: auto-migrate DB schema then launch the server
+CMD ["sh", "-c", "npx prisma db push --url \"$DATABASE_URL\" --skip-generate && npm start"]
