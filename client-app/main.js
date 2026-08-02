@@ -172,19 +172,25 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
         });
       }).on('tcp connection', (info, accept, reject) => {
         const stream = accept();
-        const localSocket = net.connect(parseInt(config.localPort), '127.0.0.1', () => {
+        const localSocket = net.connect({
+          port: parseInt(config.localPort), 
+          host: '127.0.0.1',
+          allowHalfOpen: true // Keep socket open for response if request body finishes
+        }, () => {
           localSocket.pipe(stream);
           stream.pipe(localSocket);
         });
 
-        // Make sure streams properly close each other to prevent hanging
-        localSocket.on('close', () => stream.end());
-        localSocket.on('end', () => stream.end());
-        localSocket.on('error', () => stream.end());
+        // Only handle errors to prevent crashes. .pipe() handles end/close natively.
+        localSocket.on('error', (err) => {
+          console.error('Local socket error:', err);
+          stream.end();
+        });
         
-        stream.on('close', () => localSocket.destroy());
-        stream.on('end', () => localSocket.end());
-        stream.on('error', () => localSocket.destroy());
+        stream.on('error', (err) => {
+          console.error('SSH stream error:', err);
+          localSocket.destroy();
+        });
       }).on('error', (err) => {
         reject('SSH Error: ' + err.message);
       }).connect({
