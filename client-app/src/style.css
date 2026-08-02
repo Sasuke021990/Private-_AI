@@ -1,14 +1,30 @@
 body {
   margin: 0;
-  padding: 0;
+  padding: 30px 0;
   font-family: 'Outfit', sans-serif;
   background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
   color: #f8fafc;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
   min-height: 100vh;
-  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Custom Scrollbar for the app */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1); 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.3); 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.5); 
 }
 
 .container {
@@ -18,7 +34,7 @@ body {
   padding: 30px;
   border-radius: 20px;
   width: 90%;
-  max-width: 400px;
+  max-width: 450px;
   box-shadow: 0 20px 40px rgba(0,0,0,0.4);
 }
 
@@ -273,3 +289,8 @@ input:checked + .slider:before {
   background: #8b5cf6; 
 }
 
+#tunnels-list {
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 5px;
+}
