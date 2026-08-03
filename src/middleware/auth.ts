@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
+import { revokedTokenManager } from '../lib/revokedTokenManager';
 
 export const COOKIE_NAME = 'auth_proxy_token';
 
@@ -16,7 +17,7 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
   const token = req.cookies[COOKIE_NAME];
 
   if (!token) {
-    if (req.path.startsWith('/admin/api')) {
+    if (req.originalUrl.startsWith('/admin/api')) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -25,11 +26,19 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
   }
 
   try {
-    const payload = jwt.verify(token, config.jwtSecret);
+    const payload: any = jwt.verify(token, config.jwtSecret);
+    if (revokedTokenManager.isRevoked(payload.jti)) {
+      if (req.originalUrl.startsWith('/admin/api')) {
+        res.status(401).json({ error: 'Invalid or expired token' });
+        return;
+      }
+      res.redirect('/login');
+      return;
+    }
     req.user = payload;
     next();
   } catch (error) {
-    if (req.path.startsWith('/admin/api')) {
+    if (req.originalUrl.startsWith('/admin/api')) {
       res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }

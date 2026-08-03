@@ -89,13 +89,22 @@
     </div>
 
     <script>
+        function getCookie(name) {
+            const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+
+        function csrfHeaders() {
+            return { 'Content-Type': 'application/json', 'X-CSRF-Token': getCookie('csrf_token') };
+        }
+
         async function fetchRoutes() {
             const res = await fetch('/admin/api/routes');
             if (res.status === 401) { window.location.href = '/login'; return; }
             const data = await res.json();
             renderTable(data);
         }
-        
+
         async function fetchUsers() {
             const res = await fetch('/admin/api/users');
             if (res.ok) {
@@ -104,17 +113,36 @@
             }
         }
 
+        function td(text) {
+            const el = document.createElement('td');
+            el.textContent = text;
+            return el;
+        }
+
         function renderUsersTable(users) {
             const tbody = document.getElementById('usersTable');
             tbody.innerHTML = '';
             for (const user of users) {
                 const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><code>${user.id.substring(0,8)}...</code></td>
-                    <td>${user.email}</td>
-                    <td><span class="btn" style="padding: 2px 5px; font-size: 10px;">${user.role}</span></td>
-                    <td>${new Date(user.createdAt).toLocaleString()}</td>
-                `;
+
+                const idCell = document.createElement('td');
+                const idCode = document.createElement('code');
+                idCode.textContent = user.id.substring(0, 8) + '...';
+                idCell.appendChild(idCode);
+                tr.appendChild(idCell);
+
+                tr.appendChild(td(user.email));
+
+                const roleCell = document.createElement('td');
+                const roleBadge = document.createElement('span');
+                roleBadge.className = 'btn';
+                roleBadge.style.cssText = 'padding: 2px 5px; font-size: 10px;';
+                roleBadge.textContent = user.role;
+                roleCell.appendChild(roleBadge);
+                tr.appendChild(roleCell);
+
+                tr.appendChild(td(new Date(user.createdAt).toLocaleString()));
+
                 tbody.appendChild(tr);
             }
         }
@@ -125,14 +153,36 @@
             for (const [path, routeObj] of Object.entries(routes)) {
                 const targetUrl = typeof routeObj === 'string' ? routeObj : routeObj.target;
                 const routeType = typeof routeObj === 'string' ? 'api' : routeObj.type;
-                const badgeStyle = routeType === 'app' ? 'background: #3b82f6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;' : 'background: #8b5cf6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;';
-                
+                const badgeStyle = routeType === 'app'
+                    ? 'background: #3b82f6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;'
+                    : 'background: #8b5cf6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;';
+
                 const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><code>${path}</code> <span style="${badgeStyle}">${routeType.toUpperCase()}</span></td>
-                    <td><code>${targetUrl}</code></td>
-                    <td><button class="btn btn-danger" onclick="deleteRoute('${path}')">Delete</button></td>
-                `;
+
+                const pathCell = document.createElement('td');
+                const pathCode = document.createElement('code');
+                pathCode.textContent = path;
+                pathCell.appendChild(pathCode);
+                const badge = document.createElement('span');
+                badge.style.cssText = badgeStyle;
+                badge.textContent = routeType.toUpperCase();
+                pathCell.appendChild(badge);
+                tr.appendChild(pathCell);
+
+                const targetCell = document.createElement('td');
+                const targetCode = document.createElement('code');
+                targetCode.textContent = targetUrl;
+                targetCell.appendChild(targetCode);
+                tr.appendChild(targetCell);
+
+                const actionsCell = document.createElement('td');
+                const delBtn = document.createElement('button');
+                delBtn.className = 'btn btn-danger';
+                delBtn.textContent = 'Delete';
+                delBtn.addEventListener('click', () => deleteRoute(path));
+                actionsCell.appendChild(delBtn);
+                tr.appendChild(actionsCell);
+
                 tbody.appendChild(tr);
             }
         }
@@ -141,10 +191,10 @@
             e.preventDefault();
             const path = document.getElementById('path').value;
             const target = document.getElementById('target').value;
-            
+
             await fetch('/admin/api/routes', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: csrfHeaders(),
                 body: JSON.stringify({ path, target })
             });
             fetchRoutes();
@@ -155,7 +205,7 @@
             if (confirm(`Remove route ${path}?`)) {
                 await fetch('/admin/api/routes', {
                     method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: csrfHeaders(),
                     body: JSON.stringify({ path })
                 });
                 fetchRoutes();
