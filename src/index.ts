@@ -59,9 +59,10 @@ app.post('/login', loginLimiter, express.json(), async (req, res) => {
       const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: '24h', jwtid: crypto.randomUUID() });
       issueSessionCookies(res, token);
 
-      // Admin goes to /admin, regular users go to a success page
-      const redirect = user.role === 'ADMIN' ? '/admin' : '/login?success=1';
-      res.json({ success: true, redirect });
+      // The dashboard already scopes routes/actions to the logged-in user
+      // (see src/routes/admin.ts), so both admins and regular users land there
+      // directly instead of regular users bouncing back to the login page.
+      res.json({ success: true, redirect: '/admin' });
       return;
     }
   } catch (err) {

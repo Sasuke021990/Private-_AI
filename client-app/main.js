@@ -1,21 +1,34 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { Client } = require('ssh2');
+const { Client, utils: sshUtils } = require('ssh2');
 const net = require('net');
 
 let mainWindow;
 let tray = null;
-const activeTunnels = new Map(); // Store active SSH connections
+const activeTunnels = new Map(); // remotePath -> { conn } (live ssh2 Client connections)
+
+// In-memory only — never persisted to disk. Cleared on logout or app restart.
+let session = null; // { email, cookie, csrfToken, vpsIp }
+
+const SERVER_URL = 'http://203.57.85.144:4000';
 
 // --- Config Management ---
 const configPath = path.join(app.getPath('userData'), 'tunnel-config.json');
 
 function loadConfig() {
   try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    // Migration: earlier versions of this app stored the dashboard/VPS password in
+    // plaintext here. Purge it if an old config file still has it.
+    if ('dashboardPassword' in cfg || 'vpsRootPassword' in cfg) {
+      delete cfg.dashboardPassword;
+      delete cfg.vpsRootPassword;
+      saveConfig(cfg);
+    }
+    return { email: '', runAtStartup: false, minimizeToTray: true, activeRoutes: [], ...cfg };
   } catch (e) {
-    return { vpsIp: '', vpsRootPassword: '', dashboardPassword: '', runAtStartup: false, activeRoutes: [] };
+    return { email: '', runAtStartup: false, minimizeToTray: true, activeRoutes: [] };
   }
 }
 
@@ -26,8 +39,8 @@ function saveConfig(cfg) {
 // --- App Initialization ---
 function createWindow(startHidden = false) {
   mainWindow = new BrowserWindow({
-    width: 600,
-    height: 800,
+    width: 760,
+    height: 580,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -43,9 +56,10 @@ function createWindow(startHidden = false) {
     mainWindow.hide();
   }
 
-  // Intercept close to minimize to tray
+  // Intercept close to minimize to tray, unless the user turned that setting off
   mainWindow.on('close', (event) => {
-    if (!app.isQuiting) {
+    const cfg = loadConfig();
+    if (!app.isQuiting && cfg.minimizeToTray !== false) {
       event.preventDefault();
       mainWindow.hide();
     }
@@ -53,17 +67,22 @@ function createWindow(startHidden = false) {
 }
 
 function createTray() {
-  // Use a generic icon if no specific one exists
-  // In a real app you'd load a small PNG or ICO here
-  tray = new Tray(path.join(__dirname, 'src/icon.png')); // We will gracefully fail or show empty if missing, but electron expects a file. 
-  // Wait, Electron tray requires an image. Let's just create an empty nativeImage.
+  // No icon asset shipped yet — fall back to an empty image so Tray() doesn't throw.
   const { nativeImage } = require('electron');
-  const emptyImage = nativeImage.createEmpty();
-  tray.setImage(emptyImage);
+  let image;
+  try {
+    image = nativeImage.createFromPath(path.join(__dirname, 'src/icon.png'));
+  } catch (e) {
+    image = null;
+  }
+  if (!image || image.isEmpty()) {
+    image = nativeImage.createEmpty();
+  }
+  tray = new Tray(image);
   tray.setToolTip('Auth Proxy Tunnel');
-  
+
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show Dashboard', click: () => mainWindow.show() },
+    { label: 'Show App', click: () => mainWindow.show() },
     { label: 'Quit', click: () => { app.isQuiting = true; app.quit(); } }
   ]);
   tray.setContextMenu(contextMenu);
@@ -85,7 +104,7 @@ app.on('before-quit', () => {
   app.isQuiting = true;
 });
 
-// --- IPC Handlers ---
+// --- IPC Handlers: config ---
 
 ipcMain.handle('get-config', () => {
   return loadConfig();
@@ -95,19 +114,16 @@ ipcMain.handle('save-config', (event, newCfg) => {
   const current = loadConfig();
   const updated = { ...current, ...newCfg };
   saveConfig(updated);
-  
-  // Update startup settings
+
   app.setLoginItemSettings({
     openAtLogin: updated.runAtStartup,
     args: ['--hidden']
   });
-  
+
   return true;
 });
 
-const crypto = require('crypto');
-const SERVER_URL = 'http://203.57.85.144:4000';
-
+// --- Cookie helpers ---
 // Fetch's Headers.get('set-cookie') collapses multiple Set-Cookie headers into one
 // comma-joined string on older runtimes; getSetCookie() (Node 18.14+) returns them
 // as a proper array. We need both the auth cookie and the CSRF cookie issued at login.
@@ -130,39 +146,73 @@ function cookieHeader(jar) {
   return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
-ipcMain.handle('connect-tunnel', async (event, config) => {
-  try {
-    // 1. Generate SSH Keypair using ssh2 utils instead of crypto
-    // This avoids the 'openssh' format error in Electron's older Node version
-    const { utils } = require('ssh2');
-    const { private: privateKey, public: pubKeyOpenSSH } = utils.generateKeyPairSync('rsa', { bits: 2048 });
+// --- IPC Handlers: session ---
 
-    // 2. Authenticate (SSH key is registered in step 3, tied to the route/port)
+ipcMain.handle('login', async (event, { email, password }) => {
+  try {
     const authRes = await fetch(`${SERVER_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: config.email,
-        password: config.dashboardPassword
-      })
+      body: JSON.stringify({ email, password })
     });
 
-    if (!authRes.ok) throw new Error('Login failed. Check credentials.');
+    if (!authRes.ok) {
+      let message = 'Login failed. Check your credentials.';
+      try { message = (await authRes.json()).error || message; } catch {}
+      return { success: false, message };
+    }
 
     const cookieJar = parseSetCookies(authRes);
-    const setCookie = cookieHeader(cookieJar);
+    const cookie = cookieHeader(cookieJar);
     const csrfToken = cookieJar['csrf_token'] || '';
     const authData = await authRes.json();
-    const vpsIp = authData.vpsIp;
 
-    // 3. Add Route to Dashboard, registering the SSH public key for this route's port
+    session = { email, cookie, csrfToken, vpsIp: authData.vpsIp };
+
+    // Remember the email only (never the password) for convenience next time.
+    const cfg = loadConfig();
+    cfg.email = email;
+    saveConfig(cfg);
+
+    return { success: true, email };
+  } catch (error) {
+    return { success: false, message: error.message || error.toString() };
+  }
+});
+
+ipcMain.handle('logout', () => {
+  // Local-only: forgets the session so the app returns to the login screen.
+  // Deliberately does NOT call the server's real /logout or touch active
+  // tunnels/SSH keys — closing this app session shouldn't kill tunnels that
+  // are still running; the user can log back in and they'll still be there.
+  session = null;
+  return { success: true };
+});
+
+ipcMain.handle('get-session', () => {
+  return session ? { email: session.email } : null;
+});
+
+// --- IPC Handlers: tunnels ---
+
+ipcMain.handle('connect-tunnel', async (event, config) => {
+  if (!session) {
+    return { success: false, message: 'Not logged in.' };
+  }
+
+  try {
+    // Generate SSH Keypair using ssh2 utils instead of Node's crypto module —
+    // avoids an 'openssh' format error in Electron's bundled Node version.
+    const { private: privateKey, public: pubKeyOpenSSH } = sshUtils.generateKeyPairSync('rsa', { bits: 2048 });
+
+    // Add Route to Dashboard, registering the SSH public key for this route's port
     const routeRes = await fetch(`${SERVER_URL}/admin/api/routes`, {
       method: 'POST',
       redirect: 'error',
       headers: {
         'Content-Type': 'application/json',
-        'Cookie': setCookie,
-        'X-CSRF-Token': csrfToken
+        'Cookie': session.cookie,
+        'X-CSRF-Token': session.csrfToken
       },
       body: JSON.stringify({
         path: config.remotePath,
@@ -178,7 +228,7 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
       throw new Error(`Failed to add route to dashboard (HTTP ${routeRes.status}): ${detail}`);
     }
 
-    // 4. Establish SSH Tunnel using Private Key
+    // Establish SSH Tunnel using the freshly generated private key
     return new Promise((resolve, reject) => {
       const conn = new Client();
 
@@ -189,7 +239,7 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
             return reject(err.message);
           }
 
-          activeTunnels.set(config.remotePath, { conn, setCookie, csrfToken });
+          activeTunnels.set(config.remotePath, { conn });
 
           const cfg = loadConfig();
           const routeExists = cfg.activeRoutes.find(r => r.remotePath === config.remotePath);
@@ -202,7 +252,7 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
       }).on('tcp connection', (info, accept, reject) => {
         const stream = accept();
         const localSocket = net.connect({
-          port: parseInt(config.localPort), 
+          port: parseInt(config.localPort),
           host: '127.0.0.1',
           allowHalfOpen: true // Keep socket open for response if request body finishes
         }, () => {
@@ -215,7 +265,7 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
           console.error('Local socket error:', err);
           stream.end();
         });
-        
+
         stream.on('error', (err) => {
           console.error('SSH stream error:', err);
           localSocket.destroy();
@@ -223,7 +273,7 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
       }).on('error', (err) => {
         reject('SSH Error: ' + err.message);
       }).connect({
-        host: vpsIp,
+        host: session.vpsIp,
         port: 22,
         username: 'root',
         privateKey: privateKey // Use generated private key! No passwords!
@@ -240,25 +290,26 @@ ipcMain.handle('disconnect-tunnel', async (event, config) => {
     const tunnelData = activeTunnels.get(config.remotePath);
     if (tunnelData) {
       tunnelData.conn.end();
-      
-      // Use stored cookie/CSRF token to delete route
+      activeTunnels.delete(config.remotePath);
+    }
+
+    // Delete the route server-side too, using the current session (works even for
+    // a tunnel listed from a previous app run that has no live SSH connection here).
+    if (session) {
       try {
         await fetch(`${SERVER_URL}/admin/api/routes`, {
           method: 'DELETE',
           redirect: 'error',
           headers: {
             'Content-Type': 'application/json',
-            'Cookie': tunnelData.setCookie,
-            'X-CSRF-Token': tunnelData.csrfToken || ''
+            'Cookie': session.cookie,
+            'X-CSRF-Token': session.csrfToken
           },
           body: JSON.stringify({ path: config.remotePath })
         });
       } catch (err) {}
-
-      activeTunnels.delete(config.remotePath);
     }
 
-    // Remove from saved config
     const cfg = loadConfig();
     cfg.activeRoutes = cfg.activeRoutes.filter(r => r.remotePath !== config.remotePath);
     saveConfig(cfg);
