@@ -21,6 +21,12 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
+# NOTE: this makes cookies `secure`-only (see src/config.ts / issueSessionCookies).
+# Do NOT deploy this image until a TLS-terminating reverse proxy (Nginx/Caddy/Traefik)
+# sits in front of it — otherwise the browser will refuse to store the auth cookie
+# and login will break for every user.
+ENV NODE_ENV=production
+
 # Copy package files and install ONLY production dependencies
 COPY package*.json ./
 RUN npm install --omit=dev

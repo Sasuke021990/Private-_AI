@@ -108,42 +108,67 @@ ipcMain.handle('save-config', (event, newCfg) => {
 const crypto = require('crypto');
 const SERVER_URL = 'http://203.57.85.144:4000';
 
+// Fetch's Headers.get('set-cookie') collapses multiple Set-Cookie headers into one
+// comma-joined string on older runtimes; getSetCookie() (Node 18.14+) returns them
+// as a proper array. We need both the auth cookie and the CSRF cookie issued at login.
+function parseSetCookies(res) {
+  const raw = typeof res.headers.getSetCookie === 'function'
+    ? res.headers.getSetCookie()
+    : [res.headers.get('set-cookie')].filter(Boolean);
+  const jar = {};
+  for (const line of raw) {
+    if (!line) continue;
+    const first = line.split(';')[0];
+    const eq = first.indexOf('=');
+    if (eq === -1) continue;
+    jar[first.slice(0, eq).trim()] = first.slice(eq + 1).trim();
+  }
+  return jar;
+}
+
+function cookieHeader(jar) {
+  return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
 ipcMain.handle('connect-tunnel', async (event, config) => {
   try {
-    // 1. Generate SSH Keypair using ssh2 utils instead of crypto 
+    // 1. Generate SSH Keypair using ssh2 utils instead of crypto
     // This avoids the 'openssh' format error in Electron's older Node version
     const { utils } = require('ssh2');
     const { private: privateKey, public: pubKeyOpenSSH } = utils.generateKeyPairSync('rsa', { bits: 2048 });
 
-    // 2. Authenticate and register key
+    // 2. Authenticate (SSH key is registered in step 3, tied to the route/port)
     const authRes = await fetch(`${SERVER_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: config.email,
-        password: config.dashboardPassword,
-        publicKey: pubKeyOpenSSH
+        password: config.dashboardPassword
       })
     });
 
     if (!authRes.ok) throw new Error('Login failed. Check credentials.');
-    
-    const setCookie = authRes.headers.get('set-cookie');
+
+    const cookieJar = parseSetCookies(authRes);
+    const setCookie = cookieHeader(cookieJar);
+    const csrfToken = cookieJar['csrf_token'] || '';
     const authData = await authRes.json();
     const vpsIp = authData.vpsIp;
 
-    // 3. Add Route to Dashboard
+    // 3. Add Route to Dashboard, registering the SSH public key for this route's port
     const routeRes = await fetch(`${SERVER_URL}/admin/api/routes`, {
       method: 'POST',
       redirect: 'error',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
-        'Cookie': setCookie
+        'Cookie': setCookie,
+        'X-CSRF-Token': csrfToken
       },
       body: JSON.stringify({
         path: config.remotePath,
         target: `http://127.0.0.1:${config.localPort}`,
-        type: config.routeType
+        type: config.routeType,
+        publicKey: pubKeyOpenSSH
       })
     });
 
@@ -152,15 +177,15 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
     // 4. Establish SSH Tunnel using Private Key
     return new Promise((resolve, reject) => {
       const conn = new Client();
-      
+
       conn.on('ready', () => {
         conn.forwardIn('127.0.0.1', parseInt(config.localPort), (err, port) => {
           if (err) {
             conn.end();
             return reject(err.message);
           }
-          
-          activeTunnels.set(config.remotePath, { conn, setCookie });
+
+          activeTunnels.set(config.remotePath, { conn, setCookie, csrfToken });
 
           const cfg = loadConfig();
           const routeExists = cfg.activeRoutes.find(r => r.remotePath === config.remotePath);
@@ -212,12 +237,16 @@ ipcMain.handle('disconnect-tunnel', async (event, config) => {
     if (tunnelData) {
       tunnelData.conn.end();
       
-      // Use stored cookie to delete route
+      // Use stored cookie/CSRF token to delete route
       try {
         await fetch(`${SERVER_URL}/admin/api/routes`, {
           method: 'DELETE',
           redirect: 'error',
-          headers: { 'Content-Type': 'application/json', 'Cookie': tunnelData.setCookie },
+          headers: {
+            'Content-Type': 'application/json',
+            'Cookie': tunnelData.setCookie,
+            'X-CSRF-Token': tunnelData.csrfToken || ''
+          },
           body: JSON.stringify({ path: config.remotePath })
         });
       } catch (err) {}

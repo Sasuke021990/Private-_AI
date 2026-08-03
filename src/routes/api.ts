@@ -1,16 +1,26 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
 import { prisma } from '../db';
 import { config } from '../config';
-import fs from 'fs';
 import express from 'express';
 
 export const apiRouter = Router();
 const jsonParser = express.json();
 
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false });
+const loginLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+
+function issueSessionCookies(res: Response, token: string) {
+  const secure = process.env.NODE_ENV === 'production';
+  res.cookie('auth_proxy_token', token, { httpOnly: true, secure, sameSite: 'lax' });
+  res.cookie('csrf_token', crypto.randomBytes(32).toString('hex'), { httpOnly: false, secure, sameSite: 'lax' });
+}
+
 // End-user Registration
-apiRouter.post('/register', jsonParser, async (req: Request, res: Response): Promise<void> => {
+apiRouter.post('/register', registerLimiter, jsonParser, async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: 'Email and password required' });
@@ -29,8 +39,8 @@ apiRouter.post('/register', jsonParser, async (req: Request, res: Response): Pro
       data: { email, passwordHash, role: 'USER' }
     });
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: '24h' });
-    res.cookie('auth_proxy_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: '24h', jwtid: crypto.randomUUID() });
+    issueSessionCookies(res, token);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -39,9 +49,12 @@ apiRouter.post('/register', jsonParser, async (req: Request, res: Response): Pro
 });
 
 // End-user Login (from Desktop App)
-apiRouter.post('/login', jsonParser, async (req: Request, res: Response): Promise<void> => {
-  const { email, password, publicKey } = req.body;
-  
+// Note: SSH public key registration is NOT handled here anymore — it's tied to a specific
+// route/port at `POST /admin/api/routes` time (src/lib/sshKeyManager.ts) so `permitopen`
+// can be scoped to that route's port instead of allowing access to any local port.
+apiRouter.post('/login', loginLimiter, jsonParser, async (req: Request, res: Response): Promise<void> => {
+  const { email, password } = req.body;
+
   if (!email || !password) {
     res.status(400).json({ error: 'Email and password required' });
     return;
@@ -60,19 +73,9 @@ apiRouter.post('/login', jsonParser, async (req: Request, res: Response): Promis
       return;
     }
 
-    // Register SSH Key if provided
-    if (publicKey) {
-      try {
-        const restrictedKey = `command="/bin/false",no-pty,no-X11-forwarding,permitopen="localhost:*" ${publicKey}\n`;
-        fs.appendFileSync('/usr/src/app/authorized_keys', restrictedKey);
-      } catch (err) {
-        console.error('Failed to write SSH key:', err);
-      }
-    }
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: '24h', jwtid: crypto.randomUUID() });
+    issueSessionCookies(res, token);
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: '24h' });
-    res.cookie('auth_proxy_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-    
     // Return VPS IP for the desktop app to connect to
     res.json({ success: true, vpsIp: process.env.VPS_IP || '127.0.0.1' });
   } catch (err) {
