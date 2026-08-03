@@ -4,88 +4,258 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Auth Proxy - Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
+        * { box-sizing: border-box; }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #0f172a;
+            margin: 0;
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
             color: #f8fafc;
-            margin: 0; padding: 2rem;
+            min-height: 100vh;
         }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { color: #38bdf8; border-bottom: 1px solid #334155; padding-bottom: 1rem; }
-        .card {
-            background: #1e293b;
-            padding: 1.5rem;
+
+        a { color: inherit; }
+
+        .app-shell {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 220px;
+            flex-shrink: 0;
+            background: rgba(0, 0, 0, 0.25);
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+        }
+
+        .sidebar-logo {
+            font-size: 16px;
+            font-weight: 600;
+            color: #38bdf8;
+            padding: 0 20px 18px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 2px 10px;
+            padding: 12px 14px;
             border-radius: 8px;
-            margin-bottom: 1rem;
+            color: #cbd5e1;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            width: calc(100% - 20px);
+            text-align: left;
+            font-family: inherit;
+            transition: background 0.2s ease, color 0.2s ease;
         }
-        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #334155; }
-        th { color: #94a3b8; }
+        .nav-item:hover { background: rgba(56, 189, 248, 0.08); color: #f8fafc; }
+        .nav-item.active { background: linear-gradient(90deg, rgba(14, 165, 233, 0.25), rgba(59, 130, 246, 0.12)); color: #38bdf8; }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 15px 20px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .link-btn {
+            background: transparent;
+            border: none;
+            color: #f87171;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 0;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .link-btn:hover { text-decoration: underline; }
+
+        .content { flex: 1; padding: 30px 40px; max-width: 900px; }
+
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; color: #f8fafc; }
+        .page-subtitle { font-size: 13px; color: #94a3b8; margin: 0 0 25px; }
+
+        .card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 22px;
+            border-radius: 14px;
+            margin-bottom: 20px;
+        }
+
+        .card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #38bdf8; margin: 0 0 16px; }
+
+        .form-row { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+        .form-group { flex: 1; min-width: 140px; margin-bottom: 12px; }
+        label { display: block; font-size: 12px; color: #cbd5e1; margin-bottom: 6px; }
+
+        input, select {
+            width: 100%;
+            padding: 11px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+            color: #f8fafc;
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+        }
+        select option { background: #1e293b; color: white; }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #38bdf8;
+            background: rgba(0, 0, 0, 0.4);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+        }
+
+        .path-input-wrap {
+            display: flex;
+            align-items: center;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+        .path-prefix { padding: 0 0 0 12px; color: #64748b; font-size: 14px; user-select: none; }
+        .path-input-wrap input { border: none; background: transparent; }
+        .path-input-wrap:focus-within { border-color: #38bdf8; box-shadow: 0 0 10px rgba(56, 189, 248, 0.2); }
+
         .btn {
-            background: #38bdf8; color: #0f172a; border: none;
-            padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: bold;
+            background: linear-gradient(90deg, #0ea5e9, #3b82f6);
+            color: white;
+            border: none;
+            padding: 11px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            font-family: inherit;
+            transition: all 0.2s ease;
         }
-        .btn-danger { background: #ef4444; color: white; }
-        .form-row { display: flex; gap: 1rem; align-items: flex-end; }
-        .form-group { flex: 1; }
-        label { display: block; font-size: 0.875rem; margin-bottom: 0.5rem; color: #94a3b8; }
-        input {
-            width: 100%; padding: 0.75rem; border-radius: 4px;
-            border: 1px solid #334155; background: #0f172a; color: white;
-            box-sizing: border-box;
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 5px 15px rgba(14, 165, 233, 0.4); }
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 6px 14px;
+            font-size: 11px;
         }
+        .btn-danger:hover { background: #ef4444; color: white; box-shadow: 0 5px 15px rgba(239, 68, 68, 0.35); }
+
+        #banner { margin-bottom: 16px; padding: 12px 14px; border-radius: 8px; font-size: 13px; display: none; }
+        #banner.success { display: block; background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+        #banner.error { display: block; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+        .tunnel-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 14px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        .tunnel-path { color: #4ade80; font-weight: bold; font-size: 14px; }
+        .tunnel-target { color: #94a3b8; font-size: 11px; margin-top: 4px; word-break: break-all; }
+        .type-badge { background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px; vertical-align: middle; }
+        .type-api { background: #8b5cf6; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 13px; }
+        th { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        code { font-family: 'Courier New', monospace; font-size: 12px; }
+
+        .empty-state, .loading-state { color: #64748b; font-size: 13px; text-align: center; padding: 30px 0; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Proxy Routes Dashboard</h1>
-        
-        <div class="card">
-            <h3>Add New Route</h3>
-            <form id="addRouteForm" class="form-row">
-                <div class="form-group">
-                    <label>Path (e.g. /ai)</label>
-                    <input type="text" id="path" placeholder="/app" required>
-                </div>
-                <div class="form-group">
-                    <label>Target (e.g. http://localhost:8080)</label>
-                    <input type="url" id="target" placeholder="http://localhost:3000" required>
-                </div>
-                <button type="submit" class="btn">Add / Update Route</button>
-            </form>
-        </div>
+    <div class="app-shell">
+        <nav class="sidebar">
+            <div class="sidebar-logo">🚀 Auth Proxy</div>
 
-        <div class="card">
-            <h3>Active Routes</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Path</th>
-                        <th>Target</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="routesTable">
-                    <!-- Dynamic -->
-                </tbody>
-            </table>
-        <div class="card">
-            <h3>Registered Users (Admin Only)</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Email</th>
-                        <th>Role</th>
-                        <th>Registered At</th>
-                    </tr>
-                </thead>
-                <tbody id="usersTable">
-                    <!-- Dynamic -->
-                </tbody>
-            </table>
-        </div>
+            <button type="button" class="nav-item active" data-panel="panel-tunnels">🔌 Tunnels</button>
+            <button type="button" class="nav-item" id="users-nav-item" data-panel="panel-users" style="display:none;">👥 Users</button>
+
+            <div class="sidebar-footer">
+                <a class="link-btn" href="/logout">Logout</a>
+            </div>
+        </nav>
+
+        <main class="content">
+            <!-- Tunnels Panel -->
+            <section id="panel-tunnels" class="panel active">
+                <h1>Tunnels</h1>
+                <p class="page-subtitle">Routes that proxy a public path on this server to a target.</p>
+
+                <div id="banner"></div>
+
+                <div class="card">
+                    <h3>Add Tunnel</h3>
+                    <form id="addRouteForm">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Public Path</label>
+                                <div class="path-input-wrap">
+                                    <span class="path-prefix">/</span>
+                                    <input type="text" id="path" placeholder="e.g. voice" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Target</label>
+                                <input type="url" id="target" placeholder="http://localhost:3000" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Type</label>
+                                <select id="type">
+                                    <option value="app">APP</option>
+                                    <option value="api">API</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn">Add Tunnel</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Your Tunnels</h3>
+                    <div id="routesList"><div class="loading-state">Loading...</div></div>
+                </div>
+            </section>
+
+            <!-- Users Panel (admin only, only ever shown if /admin/api/users returns 200) -->
+            <section id="panel-users" class="panel">
+                <h1>Registered Users</h1>
+                <p class="page-subtitle">Everyone with an account on this proxy.</p>
+                <div class="card">
+                    <table>
+                        <thead>
+                            <tr><th>ID</th><th>Email</th><th>Role</th><th>Registered At</th></tr>
+                        </thead>
+                        <tbody id="usersTable"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
     </div>
 
     <script>
@@ -98,19 +268,32 @@
             return { 'Content-Type': 'application/json', 'X-CSRF-Token': getCookie('csrf_token') };
         }
 
+        function showBanner(message, kind) {
+            const el = document.getElementById('banner');
+            el.textContent = message;
+            el.className = kind; // 'success' or 'error'
+            if (kind === 'success') {
+                setTimeout(() => { el.className = ''; }, 4000);
+            }
+        }
+
+        document.querySelectorAll('.nav-item[data-panel]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                document.getElementById(btn.dataset.panel).classList.add('active');
+                document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b === btn));
+            });
+        });
+
         async function fetchRoutes() {
             const res = await fetch('/admin/api/routes');
             if (res.status === 401) { window.location.href = '/login'; return; }
-            const data = await res.json();
-            renderTable(data);
-        }
-
-        async function fetchUsers() {
-            const res = await fetch('/admin/api/users');
-            if (res.ok) {
-                const data = await res.json();
-                renderUsersTable(data);
+            if (!res.ok) {
+                showBanner('Failed to load tunnels (HTTP ' + res.status + ').', 'error');
+                return;
             }
+            const data = await res.json();
+            renderRoutes(data);
         }
 
         function td(text) {
@@ -119,96 +302,118 @@
             return el;
         }
 
+        async function fetchUsers() {
+            const res = await fetch('/admin/api/users');
+            if (res.ok) {
+                const data = await res.json();
+                document.getElementById('users-nav-item').style.display = '';
+                renderUsersTable(data);
+            }
+            // Non-admins get 403 here — the Users nav item / panel simply never appears.
+        }
+
         function renderUsersTable(users) {
             const tbody = document.getElementById('usersTable');
             tbody.innerHTML = '';
             for (const user of users) {
                 const tr = document.createElement('tr');
-
                 const idCell = document.createElement('td');
                 const idCode = document.createElement('code');
                 idCode.textContent = user.id.substring(0, 8) + '...';
                 idCell.appendChild(idCode);
                 tr.appendChild(idCell);
-
                 tr.appendChild(td(user.email));
-
-                const roleCell = document.createElement('td');
-                const roleBadge = document.createElement('span');
-                roleBadge.className = 'btn';
-                roleBadge.style.cssText = 'padding: 2px 5px; font-size: 10px;';
-                roleBadge.textContent = user.role;
-                roleCell.appendChild(roleBadge);
-                tr.appendChild(roleCell);
-
+                tr.appendChild(td(user.role));
                 tr.appendChild(td(new Date(user.createdAt).toLocaleString()));
-
                 tbody.appendChild(tr);
             }
         }
 
-        function renderTable(routes) {
-            const tbody = document.getElementById('routesTable');
-            tbody.innerHTML = '';
-            for (const [path, routeObj] of Object.entries(routes)) {
+        function renderRoutes(routes) {
+            const list = document.getElementById('routesList');
+            list.innerHTML = '';
+
+            const entries = Object.entries(routes);
+            if (entries.length === 0) {
+                list.innerHTML = '<div class="empty-state">No tunnels yet. Add one above.</div>';
+                return;
+            }
+
+            for (const [path, routeObj] of entries) {
                 const targetUrl = typeof routeObj === 'string' ? routeObj : routeObj.target;
                 const routeType = typeof routeObj === 'string' ? 'api' : routeObj.type;
-                const badgeStyle = routeType === 'app'
-                    ? 'background: #3b82f6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;'
-                    : 'background: #8b5cf6; padding: 2px 5px; border-radius: 4px; font-size: 10px; margin-left: 5px; color: white;';
 
-                const tr = document.createElement('tr');
+                const card = document.createElement('div');
+                card.className = 'tunnel-card';
 
-                const pathCell = document.createElement('td');
+                const info = document.createElement('div');
+                const pathLine = document.createElement('div');
                 const pathCode = document.createElement('code');
+                pathCode.className = 'tunnel-path';
                 pathCode.textContent = path;
-                pathCell.appendChild(pathCode);
+                pathLine.appendChild(pathCode);
                 const badge = document.createElement('span');
-                badge.style.cssText = badgeStyle;
+                badge.className = `type-badge ${routeType === 'api' ? 'type-api' : ''}`;
                 badge.textContent = routeType.toUpperCase();
-                pathCell.appendChild(badge);
-                tr.appendChild(pathCell);
+                pathLine.appendChild(badge);
+                info.appendChild(pathLine);
 
-                const targetCell = document.createElement('td');
-                const targetCode = document.createElement('code');
-                targetCode.textContent = targetUrl;
-                targetCell.appendChild(targetCode);
-                tr.appendChild(targetCell);
+                const targetLine = document.createElement('div');
+                targetLine.className = 'tunnel-target';
+                targetLine.textContent = targetUrl;
+                info.appendChild(targetLine);
 
-                const actionsCell = document.createElement('td');
                 const delBtn = document.createElement('button');
-                delBtn.className = 'btn btn-danger';
+                delBtn.className = 'btn-danger';
                 delBtn.textContent = 'Delete';
                 delBtn.addEventListener('click', () => deleteRoute(path));
-                actionsCell.appendChild(delBtn);
-                tr.appendChild(actionsCell);
 
-                tbody.appendChild(tr);
+                card.appendChild(info);
+                card.appendChild(delBtn);
+                list.appendChild(card);
             }
         }
 
         document.getElementById('addRouteForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const path = document.getElementById('path').value;
+            const rawPath = document.getElementById('path').value;
+            const path = '/' + rawPath.trim().replace(/^\/+/, '');
             const target = document.getElementById('target').value;
+            const type = document.getElementById('type').value;
 
-            await fetch('/admin/api/routes', {
+            const res = await fetch('/admin/api/routes', {
                 method: 'POST',
                 headers: csrfHeaders(),
-                body: JSON.stringify({ path, target })
+                body: JSON.stringify({ path, target, type })
             });
-            fetchRoutes();
-            document.getElementById('addRouteForm').reset();
+
+            if (res.ok) {
+                showBanner(`Tunnel ${path} added.`, 'success');
+                document.getElementById('addRouteForm').reset();
+                fetchRoutes();
+            } else {
+                let message = 'Failed to add tunnel.';
+                try { message = (await res.json()).error || message; } catch {}
+                showBanner(message, 'error');
+            }
         });
 
         async function deleteRoute(path) {
-            if (confirm(`Remove route ${path}?`)) {
-                await fetch('/admin/api/routes', {
-                    method: 'DELETE',
-                    headers: csrfHeaders(),
-                    body: JSON.stringify({ path })
-                });
+            if (!confirm(`Remove tunnel ${path}? This cannot be undone.`)) return;
+
+            const res = await fetch('/admin/api/routes', {
+                method: 'DELETE',
+                headers: csrfHeaders(),
+                body: JSON.stringify({ path })
+            });
+
+            if (res.ok) {
+                showBanner(`Tunnel ${path} removed.`, 'success');
                 fetchRoutes();
+            } else {
+                let message = 'Failed to remove tunnel.';
+                try { message = (await res.json()).error || message; } catch {}
+                showBanner(message, 'error');
             }
         }
 

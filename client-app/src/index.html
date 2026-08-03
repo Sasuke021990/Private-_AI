@@ -36,7 +36,7 @@
         <div class="sidebar-logo">🚀 Auth Proxy</div>
 
         <button type="button" class="nav-item active" data-panel="panel-tunnels">
-          <span class="nav-icon">🔌</span> Active Tunnels
+          <span class="nav-icon">🔌</span> Tunnels
         </button>
         <button type="button" class="nav-item" data-panel="panel-bind">
           <span class="nav-icon">➕</span> Bind Tunnel
@@ -52,9 +52,14 @@
       </nav>
 
       <main class="content">
-        <!-- Active Tunnels Panel -->
+        <!-- Shared banner: lives outside any single panel so it stays visible
+             regardless of which sidebar section is active (e.g. a Start/Stop/
+             Delete error triggered from the Tunnels panel). -->
+        <div id="status-message" class="hidden"></div>
+
+        <!-- Tunnels Panel -->
         <section id="panel-tunnels" class="panel">
-          <div class="panel-header"><h2>Active Tunnels</h2></div>
+          <div class="panel-header"><h2>Tunnels</h2></div>
           <div id="tunnels-list">
             <!-- Dynamic -->
           </div>
@@ -86,7 +91,6 @@
             </div>
             <button type="submit" id="connect-btn">Connect Tunnel</button>
           </form>
-          <div id="status-message" class="hidden"></div>
         </section>
 
         <!-- Settings Panel -->

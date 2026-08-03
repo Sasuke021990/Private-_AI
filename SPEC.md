@@ -126,5 +126,62 @@ A full-repo audit ahead of commercial, multi-tenant use surfaced several exploit
 
 **Explicitly deferred** (multi-tenancy path namespacing, billing/plan tiers, email verification, audit logging, CI/tests, TLS-terminating reverse proxy infrastructure) — tracked separately, not part of this hardening pass. Note: `NODE_ENV=production` must not be deployed until a TLS-terminating reverse proxy is in front of the app, since it makes cookies `secure`-only.
 
+## 🖥 Desktop Client Redesign (Completed)
+The Electron client originally showed everything on one long scrolling form — login credentials, tunnel-creation fields, and the active-tunnel list all visible at once — and re-authenticated from scratch on every tunnel connect. Redesigned into:
+- **Login view**: only email, password, and a Login button until authenticated.
+- **App view**: left sidebar (Active Tunnels / Bind Tunnel / Settings) swapping content panels.
+- **Session caching**: `login`/`logout` IPC handlers cache the session (cookie, CSRF token, VPS IP) in memory once instead of re-logging in per connect. Logout is local-only and deliberately does not tear down running tunnels.
+- **Password no longer persisted**: `tunnel-config.json` keeps only email + settings; a migration strips the plaintext password from pre-existing config files.
+- **`minimizeToTray`** is now a user setting rather than hardcoded behavior.
+- **Path entry simplified**: the user types a bare segment (`voice`), the app prefixes `/`.
+
+## 🎨 UI/UX Audit (Commercialization Phase 2 — Completed)
+A line-by-line audit of both surfaces (`src/views/*.html` and `client-app/`) ahead of commercial use. Every item below was verified against the code, not assumed.
+
+### Confirmed defects — broken or actively misleading
+1. **Malformed HTML in `dashboard.html`** — verified 6 `<div>` opened vs 5 closed. The "Registered Users" card is nested *inside* the "Active Routes" card, and `.container` is never closed, causing visibly broken layout.
+2. **Desktop "Active Tunnels" list is inaccurate after restart** — the list renders from `activeRoutes` persisted to disk, but the live-connection Map (`activeTunnels` in `main.js`) is only populated by a successful connect and is never repopulated at startup. Reopening the app shows tunnels as active when no SSH connection exists.
+3. **Tray icon is invisible** — no `client-app/src/icon.png` exists, so the tray falls back to `nativeImage.createEmpty()`. With "minimize to tray" enabled the window hides with no clickable icon to restore it; the app appears to have vanished.
+4. **Web dashboard fails silently** — the Add Route and Delete handlers never inspect the response. Server rejections (409 path taken, 403 CSRF, 400 validation) produce no user-visible feedback; the form simply resets.
+5. **No tunnel auto-reconnect** — `CLIENT_SPEC.md` specifies reconnecting on `close`/`error` every 5 seconds. Verified never implemented; a transient network drop silently kills the tunnel.
+
+### Usability gaps
+6. **Public URL never surfaced in the desktop app** — the UI shows the path and local port but never the reachable URL (e.g. `http://<VPS_IP>:4000/voice`), and offers no copy-to-clipboard.
+7. **No logout control in the web dashboard** — the `/logout` endpoint exists but is unreachable from the UI.
+8. **"Disconnect" is destructive and unconfirmed** — it tears down the tunnel *and* deletes the server-side route. The web has a `confirm()` prompt; the desktop has none, so a single misclick is unrecoverable.
+9. **"Registered Users (Admin Only)" renders for non-admins** — the endpoint 403s so the table stays empty, but the heading and empty table still render, appearing broken.
+10. **No empty or loading states** in the web dashboard — tables render blank with no "no routes yet" or in-flight indication.
+11. **Dead redirect** — `register.html` still redirects to `/login?success=1`, but login now always redirects to `/admin`, making that success banner unreachable.
+
+### Web ↔ Desktop inconsistency
+12. **Path format differs by surface** — the web expects a leading slash (`/ai`); the desktop expects a bare segment (`ai`) and adds the slash itself.
+13. **Web cannot set tunnel type** — the web form never sends `type`, so routes created there silently default to `api`, while the desktop offers an explicit APP/API choice. The same action yields different results depending on where it is performed.
+14. **Divergent visual identity** — the web uses flat Segoe UI styling; the desktop uses an Outfit/glassmorphism theme. Different palettes, spacing, components, and terminology ("Routes" vs "Tunnels").
+15. **Inconsistent error presentation** — the desktop uses `alert()` for disconnect failures but inline banners elsewhere; the web surfaces nothing at all.
+
+### Missing capabilities (deferred to a later phase)
+16. `SERVER_URL` is hardcoded in `client-app/main.js` with no Settings field to change it.
+17. Login is required on every app restart (session is memory-only); no "remember me".
+18. No registration flow in the desktop app — users must find the website first.
+19. No password reset and no email verification (any string is accepted as an email).
+20. No `/health` endpoint for uptime monitoring or container healthchecks.
+21. The `Log` model exists in `schema.prisma` but nothing ever writes to it.
+22. No port validation on tunnel creation (accepts `0`, `99999`, etc.).
+
+### Resolution (items 1–15; 16–22 remain deferred)
+- **Tunnel lifecycle rebuilt around three explicit states** — `running` / `reconnecting` / `stopped` — replacing the old "only tracks live connections" model that caused item 2. On app restart every saved tunnel now honestly starts as `stopped` instead of falsely appearing active.
+- **Auto-reconnect (item 5)**: a dropped SSH connection retries every 5s reusing the already-authorized private key (the server-side route/key are untouched by an unexpected drop, so no new HTTP round-trip is needed) — surfaced to the UI as the `reconnecting` status, pushed via a new `tunnels-changed` IPC event so the renderer reflects state changes that happen with no direct user action.
+- **Stop vs Delete (item 8)**: desktop tunnels split into reversible **Stop** (tears down the SSH connection + server-side route/key via the existing `DELETE /admin/api/routes`, but keeps the tunnel's settings saved for one-click **Start**) and permanent **Delete** (Stop + forget locally, confirmation required). The web dashboard keeps a single confirmed **Delete** — its routes are static server-side config, not a desktop-managed live process, so "Stop" has no meaning there; this is a deliberate asymmetry, not a missed unification.
+- **Public URL + copy (item 6)**: desktop now shows `${serverUrl}${remotePath}` per tunnel with a Copy button (`navigator.clipboard.writeText`).
+- **Tray icon (item 3)**: fallback-to-empty-image logic kept for robustness, but a real icon is now in place.
+- **Web dashboard (items 1, 4, 7, 9, 10, 12, 13, 14)**: fully rebuilt (`dashboard.html`, `login.html`, `register.html`) to match the desktop's dark/glassmorphism system — fixes the malformed-HTML bug outright, adds inline success/error banners (checks `res.ok`, previously didn't), a logout link, empty/loading states, a bare-path-segment input matching the desktop's convention, a Type (APP/API) dropdown, and only ever creates the "Registered Users" section in the DOM when `/admin/api/users` actually returns 200.
+- **Dead redirect (item 11)**: `register.html` now redirects straight to `/admin` (the `/api/register` response already sets the session cookie, so bouncing through `/login?success=1` was pointless); the now-fully-dead success banner was removed from `login.html`.
+- **Error presentation (item 15)**: desktop's Start/Stop/Delete failures use the same inline banner pattern as Connect, replacing the old `alert()` popup.
+- **Two additional bugs caught during implementation** (not just assumed away): re-submitting an already-running tunnel path would have leaked the old SSH connection (fixed by tearing it down first); the shared error banner was originally nested inside the Bind Tunnel panel's markup, so an error triggered from the Tunnels panel would have been invisible (moved to a page-level element outside any single panel).
+- **No server-side (`src/routes`, `src/middleware`, `src/lib`) changes were needed** — Stop/Start/Delete all reuse existing endpoints and existing ownership/CSRF/revocation logic.
+
 ## 💡 Implementation Status
-Core functionality (Phases 1–6 above) is implemented and was verified working. Security Hardening (Commercialization Phase 1) is in progress per the list above — see `progress.md` for the current checklist.
+- **Phases 1–6 (core functionality)**: implemented and verified working.
+- **Security Hardening (Commercialization Phase 1)**: complete — all 11 items above implemented and verified end-to-end against a live server.
+- **Desktop Client Redesign**: complete.
+- **UI/UX Audit (Phase 2)**: complete — items 1–15 implemented; items 16–22 explicitly deferred. See `progress.md` for the working checklist.
