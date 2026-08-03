@@ -45,6 +45,7 @@ adminRouter.post('/api/routes', jsonParser, requireCsrf, async (req: Request, re
   // A path already owned by a different tenant cannot be silently reassigned
   const existing = routeManager.getRouteConfig(path);
   if (existing && !canAccessRoute(req.user, existing)) {
+    console.warn(`[routes] ${req.user?.email} (${req.user?.id}) tried to claim path "${path}" already owned by user ${existing.userId}`);
     res.status(409).json({ error: 'Path already registered by another account.' });
     return;
   }
@@ -61,6 +62,7 @@ adminRouter.post('/api/routes', jsonParser, requireCsrf, async (req: Request, re
         port = new URL(target).port;
         if (!port) throw new Error('no port');
       } catch {
+        console.warn(`[routes] rejected SSH key registration for "${path}" — target "${target}" has no explicit port`);
         res.status(400).json({ error: 'Target must include an explicit port to register an SSH tunnel key.' });
         return;
       }
@@ -69,6 +71,7 @@ adminRouter.post('/api/routes', jsonParser, requireCsrf, async (req: Request, re
 
     res.json({ success: true, routes: routeManager.getRoutes() });
   } catch (err: any) {
+    console.error(`[routes] failed to add route "${path}":`, err);
     res.status(500).json({ error: err.message });
   }
 });

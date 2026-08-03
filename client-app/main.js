@@ -172,7 +172,11 @@ ipcMain.handle('connect-tunnel', async (event, config) => {
       })
     });
 
-    if (!routeRes.ok) throw new Error('Failed to add route to dashboard.');
+    if (!routeRes.ok) {
+      let detail = '';
+      try { detail = await routeRes.text(); } catch {}
+      throw new Error(`Failed to add route to dashboard (HTTP ${routeRes.status}): ${detail}`);
+    }
 
     // 4. Establish SSH Tunnel using Private Key
     return new Promise((resolve, reject) => {
