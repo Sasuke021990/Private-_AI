@@ -1,4 +1,6 @@
 let currentConfig = {};
+let serverUrl = '';
+let latestTunnels = [];
 
 // ==================== View switching ====================
 
@@ -15,7 +17,9 @@ async function showAppView(email) {
   currentConfig = await window.api.getConfig();
   document.getElementById('runAtStartup').checked = !!currentConfig.runAtStartup;
   document.getElementById('minimizeToTray').checked = currentConfig.minimizeToTray !== false;
-  renderActiveTunnels();
+
+  latestTunnels = await window.api.getTunnels();
+  renderTunnelsList(latestTunnels);
 }
 
 function switchPanel(panelId) {
@@ -28,6 +32,14 @@ function switchPanel(panelId) {
 
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.addEventListener('click', () => switchPanel(btn.dataset.panel));
+});
+
+// The main process pushes an updated tunnel list whenever anything changes —
+// including autonomously, e.g. a background reconnect after a dropped
+// connection — so the UI stays truthful without the renderer having to poll.
+window.api.onTunnelsChanged((tunnels) => {
+  latestTunnels = tunnels;
+  renderTunnelsList(tunnels);
 });
 
 // ==================== Login ====================
@@ -69,60 +81,147 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
 
 // ==================== Active Tunnels ====================
 
-function renderActiveTunnels() {
+const STATUS_LABEL = { running: 'Running', reconnecting: 'Reconnecting', stopped: 'Stopped' };
+
+function statusBadge(status) {
+  const badge = document.createElement('span');
+  badge.className = `status-badge status-${status}`;
+  const dot = document.createElement('span');
+  dot.className = 'status-dot';
+  badge.appendChild(dot);
+  badge.appendChild(document.createTextNode(STATUS_LABEL[status] || status));
+  return badge;
+}
+
+function renderTunnelsList(tunnels) {
   const list = document.getElementById('tunnels-list');
   list.innerHTML = '';
 
-  if (!currentConfig.activeRoutes || currentConfig.activeRoutes.length === 0) {
-    list.innerHTML = '<div class="empty-state">No active tunnels yet. Create one under "Bind Tunnel".</div>';
+  if (!tunnels || tunnels.length === 0) {
+    list.innerHTML = '<div class="empty-state">No tunnels yet. Create one under "Bind Tunnel".</div>';
     return;
   }
 
-  currentConfig.activeRoutes.forEach(route => {
+  tunnels.forEach(tunnel => {
     const card = document.createElement('div');
     card.className = 'tunnel-card';
+
+    // --- Top row: path + badges, plus the URL line ---
+    const top = document.createElement('div');
+    top.className = 'tunnel-card-top';
 
     const info = document.createElement('div');
     info.className = 'tunnel-info';
 
-    const pathLine = document.createElement('span');
-    pathLine.className = 'tunnel-path';
-    pathLine.textContent = route.remotePath;
+    const pathRow = document.createElement('div');
+    pathRow.className = 'tunnel-path-row';
+    const pathEl = document.createElement('span');
+    pathEl.className = 'tunnel-path';
+    pathEl.textContent = tunnel.remotePath;
+    pathRow.appendChild(pathEl);
 
-    const badge = document.createElement('span');
-    badge.className = `type-badge ${route.routeType === 'api' ? 'type-api' : ''}`;
-    badge.textContent = route.routeType === 'api' ? 'API' : 'APP';
-    pathLine.appendChild(badge);
+    const typeBadge = document.createElement('span');
+    typeBadge.className = `type-badge ${tunnel.routeType === 'api' ? 'type-api' : ''}`;
+    typeBadge.textContent = tunnel.routeType === 'api' ? 'API' : 'APP';
+    pathRow.appendChild(typeBadge);
+    pathRow.appendChild(statusBadge(tunnel.status));
 
-    const portLine = document.createElement('span');
+    const portLine = document.createElement('div');
     portLine.className = 'tunnel-port';
-    portLine.textContent = `Local Port: ${route.localPort}`;
+    portLine.textContent = `Local Port: ${tunnel.localPort}`;
 
-    info.appendChild(pathLine);
+    info.appendChild(pathRow);
     info.appendChild(portLine);
+    top.appendChild(info);
+    card.appendChild(top);
 
-    const disconnectBtn = document.createElement('button');
-    disconnectBtn.className = 'disconnect-btn';
-    disconnectBtn.textContent = 'Disconnect';
-    disconnectBtn.addEventListener('click', async () => {
-      disconnectBtn.textContent = '...';
-      disconnectBtn.disabled = true;
+    // --- Public URL + copy ---
+    if (serverUrl) {
+      const urlRow = document.createElement('div');
+      urlRow.className = 'tunnel-url-row';
 
-      const res = await window.api.disconnectTunnel({ remotePath: route.remotePath });
-      if (res.success) {
-        currentConfig.activeRoutes = currentConfig.activeRoutes.filter(r => r.remotePath !== route.remotePath);
-        renderActiveTunnels();
-      } else {
-        alert('Failed to disconnect: ' + res.message);
-        disconnectBtn.textContent = 'Disconnect';
-        disconnectBtn.disabled = false;
+      const urlEl = document.createElement('code');
+      urlEl.className = 'tunnel-url';
+      const fullUrl = serverUrl + tunnel.remotePath;
+      urlEl.textContent = fullUrl;
+      urlRow.appendChild(urlEl);
+
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'copy-btn';
+      copyBtn.textContent = 'Copy';
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(fullUrl);
+          copyBtn.textContent = 'Copied!';
+        } catch (e) {
+          copyBtn.textContent = 'Failed';
+        }
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+      });
+      urlRow.appendChild(copyBtn);
+      card.appendChild(urlRow);
+    }
+
+    // --- Actions ---
+    const actions = document.createElement('div');
+    actions.className = 'tunnel-actions';
+
+    const primaryBtn = document.createElement('button');
+    primaryBtn.type = 'button';
+    if (tunnel.status === 'stopped') {
+      primaryBtn.className = 'start-btn';
+      primaryBtn.textContent = 'Start';
+      primaryBtn.addEventListener('click', async () => {
+        primaryBtn.disabled = true;
+        primaryBtn.textContent = 'Starting...';
+        const res = await window.api.startTunnel(tunnel.remotePath);
+        if (!res.success) {
+          showTunnelActionError(res.message);
+        }
+        // No manual re-render here — the tunnels-changed push event covers it.
+      });
+    } else {
+      primaryBtn.className = 'disconnect-btn';
+      primaryBtn.textContent = 'Stop';
+      primaryBtn.addEventListener('click', async () => {
+        primaryBtn.disabled = true;
+        primaryBtn.textContent = 'Stopping...';
+        const res = await window.api.stopTunnel(tunnel.remotePath);
+        if (!res.success) {
+          showTunnelActionError(res.message);
+        }
+      });
+    }
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'delete-icon-btn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm(`Permanently delete tunnel ${tunnel.remotePath}? This cannot be undone.`)) return;
+      deleteBtn.disabled = true;
+      const res = await window.api.deleteTunnel(tunnel.remotePath);
+      if (!res.success) {
+        showTunnelActionError(res.message);
+        deleteBtn.disabled = false;
       }
     });
 
-    card.appendChild(info);
-    card.appendChild(disconnectBtn);
+    actions.appendChild(primaryBtn);
+    actions.appendChild(deleteBtn);
+    card.appendChild(actions);
+
     list.appendChild(card);
   });
+}
+
+function showTunnelActionError(message) {
+  // Shared page-level banner (lives outside any single panel) — inline
+  // feedback everywhere, no alert() popups.
+  const statusEl = document.getElementById('status-message');
+  statusEl.textContent = message || 'Something went wrong.';
+  statusEl.className = 'error';
 }
 
 // ==================== Bind Tunnel ====================
@@ -153,9 +252,6 @@ document.getElementById('connect-form').addEventListener('submit', async (e) => 
       statusEl.className = 'success';
       btn.textContent = 'Connect Another Tunnel';
       btn.disabled = false;
-
-      currentConfig = await window.api.getConfig();
-      renderActiveTunnels();
 
       document.getElementById('localPort').value = '';
       document.getElementById('remotePath').value = '';
@@ -189,6 +285,8 @@ document.getElementById('quit-btn').addEventListener('click', () => {
 // ==================== Initialize ====================
 
 (async function init() {
+  serverUrl = await window.api.getServerUrl();
+
   currentConfig = await window.api.getConfig();
   if (currentConfig.email) {
     document.getElementById('login-email').value = currentConfig.email;

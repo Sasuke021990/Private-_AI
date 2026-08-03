@@ -6,7 +6,14 @@ const net = require('net');
 
 let mainWindow;
 let tray = null;
-const activeTunnels = new Map(); // remotePath -> { conn } (live ssh2 Client connections)
+
+// Single source of truth for every saved tunnel, keyed by remotePath.
+// { localPort, remotePath, routeType, status: 'running'|'reconnecting'|'stopped',
+//   conn, privateKey, vpsIp, stopping, reconnectTimer }
+// Only { localPort, remotePath, routeType } gets persisted to disk — status/conn/
+// privateKey are runtime-only and always reset to 'stopped' when the app starts,
+// since there is no live SSH connection to restore across a restart.
+const tunnels = new Map();
 
 // In-memory only — never persisted to disk. Cleared on logout or app restart.
 let session = null; // { email, cookie, csrfToken, vpsIp }
@@ -34,6 +41,51 @@ function loadConfig() {
 
 function saveConfig(cfg) {
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+}
+
+// --- Tunnel state helpers ---
+
+function initTunnelsFromConfig() {
+  const cfg = loadConfig();
+  tunnels.clear();
+  for (const r of cfg.activeRoutes) {
+    tunnels.set(r.remotePath, {
+      localPort: r.localPort,
+      remotePath: r.remotePath,
+      routeType: r.routeType,
+      status: 'stopped',
+      conn: null,
+      privateKey: null,
+      vpsIp: null,
+      stopping: false,
+      reconnectTimer: null,
+    });
+  }
+}
+
+function persistTunnels() {
+  const cfg = loadConfig();
+  cfg.activeRoutes = Array.from(tunnels.values()).map(t => ({
+    localPort: t.localPort,
+    remotePath: t.remotePath,
+    routeType: t.routeType,
+  }));
+  saveConfig(cfg);
+}
+
+function snapshotTunnels() {
+  return Array.from(tunnels.values()).map(t => ({
+    localPort: t.localPort,
+    remotePath: t.remotePath,
+    routeType: t.routeType,
+    status: t.status,
+  }));
+}
+
+function broadcastTunnels() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('tunnels-changed', snapshotTunnels());
+  }
 }
 
 // --- App Initialization ---
@@ -67,7 +119,6 @@ function createWindow(startHidden = false) {
 }
 
 function createTray() {
-  // No icon asset shipped yet — fall back to an empty image so Tray() doesn't throw.
   const { nativeImage } = require('electron');
   let image;
   try {
@@ -92,6 +143,7 @@ function createTray() {
 const isHiddenStart = process.argv.includes('--hidden');
 
 app.whenReady().then(() => {
+  initTunnelsFromConfig();
   createWindow(isHiddenStart);
   createTray();
 
@@ -122,6 +174,8 @@ ipcMain.handle('save-config', (event, newCfg) => {
 
   return true;
 });
+
+ipcMain.handle('get-server-url', () => SERVER_URL);
 
 // --- Cookie helpers ---
 // Fetch's Headers.get('set-cookie') collapses multiple Set-Cookie headers into one
@@ -184,7 +238,8 @@ ipcMain.handle('logout', () => {
   // Local-only: forgets the session so the app returns to the login screen.
   // Deliberately does NOT call the server's real /logout or touch active
   // tunnels/SSH keys — closing this app session shouldn't kill tunnels that
-  // are still running; the user can log back in and they'll still be there.
+  // are still running (or reconnecting); the user can log back in and
+  // they'll still be there.
   session = null;
   return { success: true };
 });
@@ -193,131 +248,245 @@ ipcMain.handle('get-session', () => {
   return session ? { email: session.email } : null;
 });
 
-// --- IPC Handlers: tunnels ---
+// --- SSH connection plumbing (shared by fresh connects and reconnects) ---
 
-ipcMain.handle('connect-tunnel', async (event, config) => {
+function wireConnection(conn, entry, { onReady, onFail }) {
+  let settled = false;
+  const finishOnce = (fn) => { if (!settled) { settled = true; fn(); } };
+
+  conn.on('ready', () => {
+    conn.forwardIn('127.0.0.1', parseInt(entry.localPort), (err) => {
+      if (err) {
+        conn.end();
+        finishOnce(() => onFail(new Error(err.message)));
+        return;
+      }
+      entry.conn = conn;
+      entry.status = 'running';
+      broadcastTunnels();
+      finishOnce(onReady);
+    });
+  }).on('tcp connection', (info, accept, reject) => {
+    const stream = accept();
+    const localSocket = net.connect({
+      port: parseInt(entry.localPort),
+      host: '127.0.0.1',
+      allowHalfOpen: true // Keep socket open for response if request body finishes
+    }, () => {
+      localSocket.pipe(stream);
+      stream.pipe(localSocket);
+    });
+
+    // Only handle errors to prevent crashes. .pipe() handles end/close natively.
+    localSocket.on('error', (err) => {
+      console.error('Local socket error:', err);
+      stream.end();
+    });
+
+    stream.on('error', (err) => {
+      console.error('SSH stream error:', err);
+      localSocket.destroy();
+    });
+  }).on('close', () => {
+    handleUnexpectedDrop(entry);
+  }).on('error', (err) => {
+    finishOnce(() => onFail(new Error('SSH Error: ' + err.message)));
+  });
+
+  conn.connect({
+    host: entry.vpsIp,
+    port: 22,
+    username: 'root',
+    privateKey: entry.privateKey // Use generated private key! No passwords!
+  });
+}
+
+function connectSsh(entry) {
+  return new Promise((resolve, reject) => {
+    const conn = new Client();
+    wireConnection(conn, entry, { onReady: resolve, onFail: reject });
+  });
+}
+
+function handleUnexpectedDrop(entry) {
+  if (entry.stopping) return; // an intentional Stop already owns this transition
+  if (!tunnels.has(entry.remotePath)) return; // deleted out from under us
+  if (entry.status === 'reconnecting') return; // already being handled
+  entry.conn = null;
+  entry.status = 'reconnecting';
+  broadcastTunnels();
+  scheduleReconnect(entry);
+}
+
+// Retries every 5s, per CLIENT_SPEC's original promise, reusing the same private
+// key already authorized server-side — a dropped connection doesn't need a new
+// HTTP round-trip, just re-establishing the SSH forward.
+function scheduleReconnect(entry) {
+  if (entry.reconnectTimer) return;
+  entry.reconnectTimer = setTimeout(async () => {
+    entry.reconnectTimer = null;
+    if (!tunnels.has(entry.remotePath) || entry.status !== 'reconnecting') return;
+    try {
+      await connectSsh(entry);
+    } catch (err) {
+      console.error(`Reconnect failed for ${entry.remotePath}:`, err.message);
+      if (tunnels.has(entry.remotePath) && entry.status !== 'running') {
+        entry.status = 'reconnecting';
+        scheduleReconnect(entry);
+      }
+    }
+  }, 5000);
+}
+
+// --- IPC Handlers: tunnel lifecycle ---
+
+async function establishTunnel(entry) {
   if (!session) {
-    return { success: false, message: 'Not logged in.' };
+    throw new Error('Not logged in.');
   }
 
-  try {
-    // Generate SSH Keypair using ssh2 utils instead of Node's crypto module —
-    // avoids an 'openssh' format error in Electron's bundled Node version.
-    const { private: privateKey, public: pubKeyOpenSSH } = sshUtils.generateKeyPairSync('rsa', { bits: 2048 });
+  // Generate SSH Keypair using ssh2 utils instead of Node's crypto module —
+  // avoids an 'openssh' format error in Electron's bundled Node version.
+  const { private: privateKey, public: pubKeyOpenSSH } = sshUtils.generateKeyPairSync('rsa', { bits: 2048 });
 
-    // Add Route to Dashboard, registering the SSH public key for this route's port
-    const routeRes = await fetch(`${SERVER_URL}/admin/api/routes`, {
-      method: 'POST',
-      redirect: 'error',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cookie': session.cookie,
-        'X-CSRF-Token': session.csrfToken
-      },
-      body: JSON.stringify({
-        path: config.remotePath,
-        target: `http://127.0.0.1:${config.localPort}`,
-        type: config.routeType,
-        publicKey: pubKeyOpenSSH
-      })
-    });
+  // Add Route to Dashboard, registering the SSH public key for this route's port
+  const routeRes = await fetch(`${SERVER_URL}/admin/api/routes`, {
+    method: 'POST',
+    redirect: 'error',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cookie': session.cookie,
+      'X-CSRF-Token': session.csrfToken
+    },
+    body: JSON.stringify({
+      path: entry.remotePath,
+      target: `http://127.0.0.1:${entry.localPort}`,
+      type: entry.routeType,
+      publicKey: pubKeyOpenSSH
+    })
+  });
 
-    if (!routeRes.ok) {
-      let detail = '';
-      try { detail = await routeRes.text(); } catch {}
-      throw new Error(`Failed to add route to dashboard (HTTP ${routeRes.status}): ${detail}`);
-    }
+  if (!routeRes.ok) {
+    let detail = '';
+    try { detail = await routeRes.text(); } catch {}
+    throw new Error(`Failed to add route to dashboard (HTTP ${routeRes.status}): ${detail}`);
+  }
 
-    // Establish SSH Tunnel using the freshly generated private key
-    return new Promise((resolve, reject) => {
-      const conn = new Client();
+  entry.privateKey = privateKey;
+  entry.vpsIp = session.vpsIp;
+  entry.stopping = false;
 
-      conn.on('ready', () => {
-        conn.forwardIn('127.0.0.1', parseInt(config.localPort), (err, port) => {
-          if (err) {
-            conn.end();
-            return reject(err.message);
-          }
+  await connectSsh(entry);
+}
 
-          activeTunnels.set(config.remotePath, { conn });
+async function stopTunnelInternal(entry) {
+  entry.stopping = true;
+  if (entry.reconnectTimer) {
+    clearTimeout(entry.reconnectTimer);
+    entry.reconnectTimer = null;
+  }
+  if (entry.conn) {
+    try { entry.conn.end(); } catch (e) {}
+    entry.conn = null;
+  }
 
-          const cfg = loadConfig();
-          const routeExists = cfg.activeRoutes.find(r => r.remotePath === config.remotePath);
-          if (!routeExists) {
-            cfg.activeRoutes.push({ localPort: config.localPort, remotePath: config.remotePath, routeType: config.routeType });
-            saveConfig(cfg);
-          }
-          resolve({ success: true, message: 'Connected!' });
-        });
-      }).on('tcp connection', (info, accept, reject) => {
-        const stream = accept();
-        const localSocket = net.connect({
-          port: parseInt(config.localPort),
-          host: '127.0.0.1',
-          allowHalfOpen: true // Keep socket open for response if request body finishes
-        }, () => {
-          localSocket.pipe(stream);
-          stream.pipe(localSocket);
-        });
-
-        // Only handle errors to prevent crashes. .pipe() handles end/close natively.
-        localSocket.on('error', (err) => {
-          console.error('Local socket error:', err);
-          stream.end();
-        });
-
-        stream.on('error', (err) => {
-          console.error('SSH stream error:', err);
-          localSocket.destroy();
-        });
-      }).on('error', (err) => {
-        reject('SSH Error: ' + err.message);
-      }).connect({
-        host: session.vpsIp,
-        port: 22,
-        username: 'root',
-        privateKey: privateKey // Use generated private key! No passwords!
+  // Remove the route server-side too (also revokes the SSH key), using the
+  // current session — works even for a tunnel that has no live SSH connection
+  // here (e.g. one still showing "stopped" from a previous app run).
+  if (session) {
+    try {
+      await fetch(`${SERVER_URL}/admin/api/routes`, {
+        method: 'DELETE',
+        redirect: 'error',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': session.cookie,
+          'X-CSRF-Token': session.csrfToken
+        },
+        body: JSON.stringify({ path: entry.remotePath })
       });
-    });
+    } catch (err) {}
+  }
 
+  entry.status = 'stopped';
+  entry.privateKey = null;
+  entry.vpsIp = null;
+  entry.stopping = false;
+}
+
+ipcMain.handle('get-tunnels', () => snapshotTunnels());
+
+// "Bind Tunnel" — create (or replace) a saved tunnel and start it immediately.
+ipcMain.handle('connect-tunnel', async (event, config) => {
+  const entry = tunnels.get(config.remotePath) || {
+    localPort: config.localPort,
+    remotePath: config.remotePath,
+    routeType: config.routeType,
+    status: 'stopped',
+    conn: null,
+    privateKey: null,
+    vpsIp: null,
+    stopping: false,
+    reconnectTimer: null,
+  };
+
+  // Re-submitting a path that's already running/reconnecting: tear down the old
+  // SSH connection first so we don't leak it while opening a new one.
+  if (entry.status !== 'stopped') {
+    await stopTunnelInternal(entry);
+  }
+
+  entry.localPort = config.localPort;
+  entry.routeType = config.routeType;
+
+  try {
+    await establishTunnel(entry);
+    tunnels.set(entry.remotePath, entry);
+    persistTunnels();
+    broadcastTunnels();
+    return { success: true, message: 'Connected!' };
   } catch (error) {
     return { success: false, message: error.message || error.toString() };
   }
 });
 
-ipcMain.handle('disconnect-tunnel', async (event, config) => {
+// Re-starts a previously saved (now stopped) tunnel using its saved settings.
+ipcMain.handle('start-tunnel', async (event, { remotePath }) => {
+  const entry = tunnels.get(remotePath);
+  if (!entry) return { success: false, message: 'Unknown tunnel.' };
+
   try {
-    const tunnelData = activeTunnels.get(config.remotePath);
-    if (tunnelData) {
-      tunnelData.conn.end();
-      activeTunnels.delete(config.remotePath);
-    }
-
-    // Delete the route server-side too, using the current session (works even for
-    // a tunnel listed from a previous app run that has no live SSH connection here).
-    if (session) {
-      try {
-        await fetch(`${SERVER_URL}/admin/api/routes`, {
-          method: 'DELETE',
-          redirect: 'error',
-          headers: {
-            'Content-Type': 'application/json',
-            'Cookie': session.cookie,
-            'X-CSRF-Token': session.csrfToken
-          },
-          body: JSON.stringify({ path: config.remotePath })
-        });
-      } catch (err) {}
-    }
-
-    const cfg = loadConfig();
-    cfg.activeRoutes = cfg.activeRoutes.filter(r => r.remotePath !== config.remotePath);
-    saveConfig(cfg);
-
-    return { success: true };
-  } catch (e) {
-    return { success: false, message: e.message };
+    await establishTunnel(entry);
+    broadcastTunnels();
+    return { success: true, message: 'Connected!' };
+  } catch (error) {
+    entry.status = 'stopped';
+    broadcastTunnels();
+    return { success: false, message: error.message || error.toString() };
   }
+});
+
+// Reversible: tears down the SSH connection and the server-side route/key, but
+// keeps the tunnel's settings saved locally so Start is one click.
+ipcMain.handle('stop-tunnel', async (event, { remotePath }) => {
+  const entry = tunnels.get(remotePath);
+  if (!entry) return { success: false, message: 'Unknown tunnel.' };
+
+  await stopTunnelInternal(entry);
+  broadcastTunnels();
+  return { success: true };
+});
+
+// Permanent: stops (best-effort) and forgets the tunnel entirely.
+ipcMain.handle('delete-tunnel', async (event, { remotePath }) => {
+  const entry = tunnels.get(remotePath);
+  if (entry) {
+    await stopTunnelInternal(entry);
+    tunnels.delete(remotePath);
+    persistTunnels();
+  }
+  broadcastTunnels();
+  return { success: true };
 });
 
 // IPC Handler to exit app completely

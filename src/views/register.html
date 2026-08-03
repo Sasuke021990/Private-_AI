@@ -4,58 +4,90 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AuthProxy - Register</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
+        * { box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #0f172a;
+            margin: 0;
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
             color: #f8fafc;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
-            margin: 0;
         }
-        .login-box {
-            background: #1e293b;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-            width: 100%;
-            max-width: 400px;
+        .login-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 380px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            text-align: center;
         }
-        h1 { color: #38bdf8; text-align: center; margin-top: 0; }
-        .form-group { margin-bottom: 1rem; }
-        label { display: block; margin-bottom: 0.5rem; color: #94a3b8; }
+        .logo { font-size: 22px; font-weight: 600; color: #38bdf8; margin-bottom: 5px; }
+        .subtitle { font-size: 13px; color: #94a3b8; margin: 0 0 25px; }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        label { display: block; font-size: 12px; color: #cbd5e1; margin-bottom: 5px; }
         input {
-            width: 100%; padding: 0.75rem; border-radius: 4px;
-            border: 1px solid #334155; background: #0f172a; color: white;
-            box-sizing: border-box;
+            width: 100%;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+            color: #f8fafc;
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
         }
-        .btn {
-            background: #38bdf8; color: #0f172a; border: none; width: 100%;
-            padding: 0.75rem; border-radius: 4px; cursor: pointer; font-weight: bold;
-            margin-top: 1rem;
+        input:focus {
+            outline: none;
+            border-color: #38bdf8;
+            background: rgba(0, 0, 0, 0.4);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
         }
-        .error { color: #ef4444; text-align: center; margin-top: 1rem; display: none; }
-        .link { text-align: center; margin-top: 1rem; }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(90deg, #0ea5e9, #3b82f6);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(14, 165, 233, 0.4); }
+        .error { color: #f87171; font-size: 12px; text-align: center; margin-top: 12px; display: none; }
+        .link { text-align: center; margin-top: 18px; font-size: 13px; }
         .link a { color: #38bdf8; text-decoration: none; }
+        .link a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
-    <div class="login-box">
-        <h1>Create Account</h1>
+    <div class="login-card">
+        <div class="logo">🚀 Create Account</div>
+        <p class="subtitle">Securely expose your local apps to the world.</p>
+
         <form id="registerForm">
-            <div class="form-group">
+            <div class="input-group">
                 <label>Email</label>
                 <input type="email" id="email" required>
             </div>
-            <div class="form-group">
+            <div class="input-group">
                 <label>Password</label>
                 <input type="password" id="password" required>
             </div>
-            <button type="submit" class="btn">Register</button>
+            <button type="submit">Register</button>
         </form>
+
         <div id="error" class="error"></div>
+
         <div class="link">
             <a href="/login">Already have an account? Login here</a>
         </div>
@@ -67,23 +99,26 @@
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const errorEl = document.getElementById('error');
-            
+            errorEl.style.display = 'none';
+
             try {
                 const res = await fetch('/api/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
-                
+
                 if (res.ok) {
-                    window.location.href = '/login?success=1';
+                    // /api/register already logs the new account in (sets the session
+                    // cookie), so go straight to the dashboard instead of back to login.
+                    window.location.href = '/admin';
                 } else {
                     const data = await res.json();
-                    errorEl.innerText = data.error || 'Registration failed';
+                    errorEl.textContent = data.error || 'Registration failed';
                     errorEl.style.display = 'block';
                 }
             } catch (err) {
-                errorEl.innerText = 'Network error';
+                errorEl.textContent = 'Network error';
                 errorEl.style.display = 'block';
             }
         });

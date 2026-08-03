@@ -4,87 +4,89 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AuthProxy - Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #0f172a;
+            margin: 0;
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
             color: #f8fafc;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
-            margin: 0;
         }
-        .container {
-            background: #1e293b;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-            width: 100%;
-            max-width: 400px;
+        .login-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 380px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            text-align: center;
         }
-        h2 { margin-top: 0; text-align: center; color: #38bdf8; }
-        .form-group { margin-bottom: 1rem; }
-        label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; }
+        .logo { font-size: 22px; font-weight: 600; color: #38bdf8; margin-bottom: 5px; }
+        .subtitle { font-size: 13px; color: #94a3b8; margin: 0 0 25px; }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        label { display: block; font-size: 12px; color: #cbd5e1; margin-bottom: 5px; }
         input {
             width: 100%;
-            padding: 0.75rem;
-            border-radius: 4px;
-            border: 1px solid #334155;
-            background: #0f172a;
-            color: white;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+            color: #f8fafc;
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
         }
-        input:focus { outline: none; border-color: #38bdf8; }
+        input:focus {
+            outline: none;
+            border-color: #38bdf8;
+            background: rgba(0, 0, 0, 0.4);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+        }
         button {
             width: 100%;
-            padding: 0.75rem;
-            background: #38bdf8;
-            color: #0f172a;
+            padding: 12px;
+            background: linear-gradient(90deg, #0ea5e9, #3b82f6);
             border: none;
-            border-radius: 4px;
-            font-weight: bold;
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
-            margin-top: 1rem;
+            margin-top: 20px;
+            font-family: inherit;
+            transition: all 0.2s ease;
         }
-        button:hover { background: #7dd3fc; }
-        .error { color: #ef4444; font-size: 0.875rem; text-align: center; margin-bottom: 1rem; display: none; }
-        .success-msg {
-            background: rgba(34, 197, 94, 0.15);
-            color: #4ade80;
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            padding: 1rem;
-            border-radius: 6px;
-            text-align: center;
-            margin-bottom: 1rem;
-            display: none;
-        }
-        .link { text-align: center; margin-top: 1rem; font-size: 0.875rem; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(14, 165, 233, 0.4); }
+        .error { color: #f87171; font-size: 12px; text-align: center; margin-top: 12px; display: none; }
+        .link { text-align: center; margin-top: 18px; font-size: 13px; }
         .link a { color: #38bdf8; text-decoration: none; }
         .link a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>🔐 AuthProxy Login</h2>
-
-        <div id="success" class="success-msg">
-            ✅ Login successful! You can now use the Desktop App to connect tunnels.
-        </div>
-
-        <div id="error" class="error">Invalid credentials</div>
+    <div class="login-card">
+        <div class="logo">🔐 AuthProxy Login</div>
+        <p class="subtitle">Securely expose your local apps to the world.</p>
 
         <form id="loginForm">
-            <div class="form-group">
+            <div class="input-group">
                 <label>Email or Username</label>
                 <input type="text" id="email" placeholder="you@example.com or admin" required>
             </div>
-            <div class="form-group">
+            <div class="input-group">
                 <label>Password</label>
                 <input type="password" id="password" placeholder="••••••••" required>
             </div>
             <button type="submit">Login</button>
         </form>
+
+        <div id="error" class="error"></div>
 
         <div class="link">
             <a href="/register">Don't have an account? Register here</a>
@@ -92,19 +94,12 @@
     </div>
 
     <script>
-        // Show success message if redirected after login
-        if (new URLSearchParams(window.location.search).get('success')) {
-            document.getElementById('success').style.display = 'block';
-        }
-
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const errorEl = document.getElementById('error');
-            const successEl = document.getElementById('success');
             errorEl.style.display = 'none';
-            successEl.style.display = 'none';
 
             try {
                 const res = await fetch('/login', {
@@ -117,10 +112,13 @@
                     const data = await res.json();
                     window.location.href = data.redirect || '/admin';
                 } else {
+                    let message = 'Invalid credentials';
+                    try { message = (await res.json()).error || message; } catch {}
+                    errorEl.textContent = message;
                     errorEl.style.display = 'block';
                 }
             } catch (err) {
-                errorEl.innerText = 'Network error';
+                errorEl.textContent = 'Network error';
                 errorEl.style.display = 'block';
             }
         });
