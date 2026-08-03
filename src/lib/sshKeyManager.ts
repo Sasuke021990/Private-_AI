@@ -25,17 +25,28 @@ async function regenerateAuthorizedKeys(): Promise<void> {
   const lines = routes.map(r => r.sshPublicKey).filter((k): k is string => !!k);
   const content = lines.length > 0 ? lines.join('') : '';
 
-  const tmpPath = `${AUTHORIZED_KEYS_PATH}.tmp`;
   await fs.promises.mkdir(path.dirname(AUTHORIZED_KEYS_PATH), { recursive: true }).catch(() => {});
-  await fs.promises.writeFile(tmpPath, content, { mode: 0o600 });
-  await fs.promises.rename(tmpPath, AUTHORIZED_KEYS_PATH);
+  // NOTE: this file is typically a Docker bind-mount of a single host file
+  // (docker-compose.yml: ~/.ssh/authorized_keys:/usr/src/app/authorized_keys).
+  // The usual "write to a temp file then rename() into place" pattern for atomic
+  // replacement does NOT work here — rename()'ing a new inode onto a bind-mount
+  // target fails with EBUSY, since the mount point can't be replaced that way.
+  // Writing directly to the file's existing inode works fine (Docker bind mounts
+  // support in-place writes, just not being swapped out via rename).
+  await fs.promises.writeFile(AUTHORIZED_KEYS_PATH, content, { mode: 0o600 });
 }
 
 function queueRegenerate(): Promise<void> {
-  writeQueue = writeQueue.then(() => regenerateAuthorizedKeys()).catch(err => {
+  // Chain onto the queue so writes never interleave, but don't let a failed attempt
+  // wedge the queue forever — the next call should still get to try. The rejection
+  // from THIS attempt is still returned to its own caller so failures aren't silently
+  // swallowed (e.g. so "add route" surfaces an error instead of reporting success
+  // while the SSH key silently never made it to disk).
+  const attempt = writeQueue.then(() => regenerateAuthorizedKeys());
+  writeQueue = attempt.catch(err => {
     console.error('Failed to regenerate authorized_keys:', err);
   });
-  return writeQueue;
+  return attempt;
 }
 
 export async function registerKeyForRoute(routeId: string, publicKey: string, port: string | number): Promise<void> {
