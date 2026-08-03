@@ -7,64 +7,111 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="container">
-    <div class="header" style="position: relative;">
+
+  <!-- ============ LOGIN VIEW ============ -->
+  <div id="login-view" class="view">
+    <div class="login-card">
       <div class="logo">🚀 Auth Proxy Tunnel</div>
       <p class="subtitle">Securely expose your local apps to the world.</p>
-      <button id="quit-btn" style="position: absolute; top: 0; right: 0; background: transparent; color: #ef4444; width: auto; padding: 5px; margin: 0; font-size: 12px;">Power Off</button>
+
+      <form id="login-form">
+        <div class="input-group">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" placeholder="you@example.com" required>
+        </div>
+        <div class="input-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" placeholder="••••••••" required>
+        </div>
+        <div id="login-error" class="form-error hidden"></div>
+        <button type="submit" id="login-btn">Login</button>
+      </form>
     </div>
+  </div>
 
-    <form id="global-config-form">
-      <div class="section-title">Global Configuration</div>
-      <!-- Deleted VPS IP -->
-      
-      <div class="input-group">
-        <label for="email">User Email</label>
-        <input type="email" id="email" placeholder="you@example.com" required>
-      </div>
-      <div class="input-group">
-        <label for="dashboardPassword">User Password</label>
-        <input type="password" id="dashboardPassword" placeholder="••••••••" required>
-      </div>
+  <!-- ============ APP VIEW (shown after login) ============ -->
+  <div id="app-view" class="view hidden">
+    <div class="app-shell">
+      <nav class="sidebar">
+        <div class="sidebar-logo">🚀 Auth Proxy</div>
 
-      <div class="toggle-group">
-        <label class="toggle-switch">
-          <input type="checkbox" id="runAtStartup">
-          <span class="slider"></span>
-        </label>
-        <span class="toggle-label">Run automatically at Startup</span>
-      </div>
-    </form>
+        <button type="button" class="nav-item active" data-panel="panel-tunnels">
+          <span class="nav-icon">🔌</span> Active Tunnels
+        </button>
+        <button type="button" class="nav-item" data-panel="panel-bind">
+          <span class="nav-icon">➕</span> Bind Tunnel
+        </button>
+        <button type="button" class="nav-item" data-panel="panel-settings">
+          <span class="nav-icon">⚙️</span> Settings
+        </button>
 
-    <div class="divider"></div>
-
-    <form id="connect-form">
-      <div class="section-title">Add New Tunnel</div>
-      <div class="row">
-        <div class="input-group half">
-          <label for="localPort">Local Port</label>
-          <input type="number" id="localPort" placeholder="e.g. 1235" required>
+        <div class="sidebar-footer">
+          <div class="session-email" id="session-email"></div>
+          <button type="button" class="link-btn" id="logout-btn">Logout</button>
         </div>
-        <div class="input-group half">
-          <label for="remotePath">Public Path</label>
-          <input type="text" id="remotePath" placeholder="e.g. /ai" required>
-        </div>
-      </div>
-      <div class="input-group">
-        <label for="routeType">Tunnel Type</label>
-        <select id="routeType">
-          <option value="app">Web App (Fix UI Assets)</option>
-          <option value="api">Raw API (No Rewriting)</option>
-        </select>
-      </div>
-      <button type="submit" id="connect-btn">Connect Tunnel</button>
-    </form>
-    
-    <div id="status-message" class="hidden"></div>
+      </nav>
 
-    <div class="section-title" style="margin-top: 30px;">Active Tunnels</div>
-    <div id="tunnels-list">
-      <!-- Dynamic Tunnels will appear here -->
+      <main class="content">
+        <!-- Active Tunnels Panel -->
+        <section id="panel-tunnels" class="panel">
+          <div class="panel-header"><h2>Active Tunnels</h2></div>
+          <div id="tunnels-list">
+            <!-- Dynamic -->
+          </div>
+        </section>
+
+        <!-- Bind Tunnel Panel -->
+        <section id="panel-bind" class="panel hidden">
+          <div class="panel-header"><h2>Bind Tunnel</h2></div>
+          <form id="connect-form">
+            <div class="row">
+              <div class="input-group half">
+                <label for="localPort">Local Port</label>
+                <input type="number" id="localPort" placeholder="e.g. 1235" required>
+              </div>
+              <div class="input-group half">
+                <label for="remotePath">Public Path</label>
+                <div class="path-input-wrap">
+                  <span class="path-prefix">/</span>
+                  <input type="text" id="remotePath" placeholder="e.g. voice" required>
+                </div>
+              </div>
+            </div>
+            <div class="input-group">
+              <label for="routeType">Tunnel Type</label>
+              <select id="routeType">
+                <option value="app">APP</option>
+                <option value="api">API</option>
+              </select>
+            </div>
+            <button type="submit" id="connect-btn">Connect Tunnel</button>
+          </form>
+          <div id="status-message" class="hidden"></div>
+        </section>
+
+        <!-- Settings Panel -->
+        <section id="panel-settings" class="panel hidden">
+          <div class="panel-header"><h2>Settings</h2></div>
+
+          <div class="toggle-group">
+            <label class="toggle-switch">
+              <input type="checkbox" id="runAtStartup">
+              <span class="slider"></span>
+            </label>
+            <span class="toggle-label">Run automatically at Startup</span>
+          </div>
+
+          <div class="toggle-group">
+            <label class="toggle-switch">
+              <input type="checkbox" id="minimizeToTray">
+              <span class="slider"></span>
+            </label>
+            <span class="toggle-label">Minimize to tray when closed</span>
+          </div>
+
+          <button type="button" id="quit-btn" class="danger-btn">Quit Application</button>
+        </section>
+      </main>
     </div>
   </div>
 

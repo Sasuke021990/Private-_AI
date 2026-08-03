@@ -1,129 +1,167 @@
 let currentConfig = {};
 
-async function loadInitialConfig() {
-  currentConfig = await window.api.getConfig();
-  
-  document.getElementById('email').value = currentConfig.email || '';
-  document.getElementById('dashboardPassword').value = currentConfig.dashboardPassword || '';
-  if (currentConfig.runAtStartup) document.getElementById('runAtStartup').checked = true;
+// ==================== View switching ====================
 
-  renderActiveTunnels();
-  
-  // Auto-connect saved tunnels if they are in the list!
-  // In a robust implementation you would iterate and connect them here in the background.
+function showLoginView() {
+  document.getElementById('login-view').classList.remove('hidden');
+  document.getElementById('app-view').classList.add('hidden');
 }
+
+async function showAppView(email) {
+  document.getElementById('login-view').classList.add('hidden');
+  document.getElementById('app-view').classList.remove('hidden');
+  document.getElementById('session-email').textContent = email || '';
+
+  currentConfig = await window.api.getConfig();
+  document.getElementById('runAtStartup').checked = !!currentConfig.runAtStartup;
+  document.getElementById('minimizeToTray').checked = currentConfig.minimizeToTray !== false;
+  renderActiveTunnels();
+}
+
+function switchPanel(panelId) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+  document.getElementById(panelId).classList.remove('hidden');
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.panel === panelId);
+  });
+}
+
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => switchPanel(btn.dataset.panel));
+});
+
+// ==================== Login ====================
+
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const errorEl = document.getElementById('login-error');
+  const btn = document.getElementById('login-btn');
+
+  errorEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'Logging in...';
+
+  try {
+    const res = await window.api.login({ email, password });
+    if (res.success) {
+      await showAppView(email);
+    } else {
+      errorEl.textContent = res.message || 'Login failed.';
+      errorEl.classList.remove('hidden');
+    }
+  } catch (err) {
+    errorEl.textContent = err.message || 'Network error.';
+    errorEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Login';
+  }
+});
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await window.api.logout();
+  document.getElementById('login-password').value = '';
+  showLoginView();
+});
+
+// ==================== Active Tunnels ====================
 
 function renderActiveTunnels() {
   const list = document.getElementById('tunnels-list');
   list.innerHTML = '';
-  
+
   if (!currentConfig.activeRoutes || currentConfig.activeRoutes.length === 0) {
-    list.innerHTML = '<div style="text-align: center; color: #64748b; font-size: 12px;">No active tunnels</div>';
+    list.innerHTML = '<div class="empty-state">No active tunnels yet. Create one under "Bind Tunnel".</div>';
     return;
   }
 
   currentConfig.activeRoutes.forEach(route => {
     const card = document.createElement('div');
     card.className = 'tunnel-card';
-    card.innerHTML = `
-      <div class="tunnel-info">
-        <span class="tunnel-path">http://${currentConfig.vpsIp}:4000${route.remotePath} <span class="type-badge ${route.routeType === 'api' ? 'type-api' : ''}">${route.routeType === 'api' ? 'API' : 'APP'}</span></span>
-        <span class="tunnel-port">Local Port: ${route.localPort}</span>
-      </div>
-      <button class="disconnect-btn" data-path="${route.remotePath}">Disconnect</button>
-    `;
-    list.appendChild(card);
-  });
 
-  // Attach disconnect handlers
-  document.querySelectorAll('.disconnect-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const path = e.target.getAttribute('data-path');
-      e.target.textContent = '...';
-      e.target.disabled = true;
-      
-      const payload = {
-        email: document.getElementById('email').value,
-        dashboardPassword: document.getElementById('dashboardPassword').value,
-        remotePath: path
-      };
-      
-      const res = await window.api.disconnectTunnel(payload);
+    const info = document.createElement('div');
+    info.className = 'tunnel-info';
+
+    const pathLine = document.createElement('span');
+    pathLine.className = 'tunnel-path';
+    pathLine.textContent = route.remotePath;
+
+    const badge = document.createElement('span');
+    badge.className = `type-badge ${route.routeType === 'api' ? 'type-api' : ''}`;
+    badge.textContent = route.routeType === 'api' ? 'API' : 'APP';
+    pathLine.appendChild(badge);
+
+    const portLine = document.createElement('span');
+    portLine.className = 'tunnel-port';
+    portLine.textContent = `Local Port: ${route.localPort}`;
+
+    info.appendChild(pathLine);
+    info.appendChild(portLine);
+
+    const disconnectBtn = document.createElement('button');
+    disconnectBtn.className = 'disconnect-btn';
+    disconnectBtn.textContent = 'Disconnect';
+    disconnectBtn.addEventListener('click', async () => {
+      disconnectBtn.textContent = '...';
+      disconnectBtn.disabled = true;
+
+      const res = await window.api.disconnectTunnel({ remotePath: route.remotePath });
       if (res.success) {
-        currentConfig.activeRoutes = currentConfig.activeRoutes.filter(r => r.remotePath !== path);
+        currentConfig.activeRoutes = currentConfig.activeRoutes.filter(r => r.remotePath !== route.remotePath);
         renderActiveTunnels();
       } else {
         alert('Failed to disconnect: ' + res.message);
-        e.target.textContent = 'Disconnect';
-        e.target.disabled = false;
+        disconnectBtn.textContent = 'Disconnect';
+        disconnectBtn.disabled = false;
       }
     });
+
+    card.appendChild(info);
+    card.appendChild(disconnectBtn);
+    list.appendChild(card);
   });
 }
 
-// Save global settings automatically when changed
-const globalInputs = ['dashboardPassword', 'email'];
-globalInputs.forEach(id => {
-  document.getElementById(id).addEventListener('change', (e) => {
-    currentConfig[id] = e.target.value;
-    window.api.saveConfig({ [id]: e.target.value });
-  });
-});
-
-document.getElementById('runAtStartup').addEventListener('change', (e) => {
-  currentConfig.runAtStartup = e.target.checked;
-  window.api.saveConfig({ runAtStartup: e.target.checked });
-});
-
-document.getElementById('quit-btn').addEventListener('click', () => {
-  window.api.quitApp();
-});
+// ==================== Bind Tunnel ====================
 
 document.getElementById('connect-form').addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  const email = document.getElementById('email').value;
-  const dashboardPassword = document.getElementById('dashboardPassword').value;
-  
   const localPort = document.getElementById('localPort').value;
-  const remotePath = document.getElementById('remotePath').value;
+  const rawPath = document.getElementById('remotePath').value;
   const routeType = document.getElementById('routeType').value;
+
+  // The user types just the segment (e.g. "voice"); strip any leading slashes/
+  // whitespace they might still type and build the real path ourselves.
+  const remotePath = '/' + rawPath.trim().replace(/^\/+/, '');
 
   const btn = document.getElementById('connect-btn');
   const statusEl = document.getElementById('status-message');
 
-  // Update UI
   btn.disabled = true;
   btn.textContent = 'Connecting...';
   statusEl.className = 'hidden';
 
   try {
-    const response = await window.api.connectTunnel({
-      email,
-      dashboardPassword,
-      localPort,
-      remotePath,
-      routeType
-    });
+    const response = await window.api.connectTunnel({ localPort, remotePath, routeType });
 
     if (response.success) {
       statusEl.textContent = response.message;
       statusEl.className = 'success';
       btn.textContent = 'Connect Another Tunnel';
       btn.disabled = false;
-      
-      // Update config manually since main.js modified it
+
       currentConfig = await window.api.getConfig();
       renderActiveTunnels();
-      
-      // Clear form
+
       document.getElementById('localPort').value = '';
       document.getElementById('remotePath').value = '';
-      
     } else {
       throw new Error(response.message);
     }
-
   } catch (err) {
     statusEl.textContent = err.message || 'Connection failed.';
     statusEl.className = 'error';
@@ -132,5 +170,34 @@ document.getElementById('connect-form').addEventListener('submit', async (e) => 
   }
 });
 
-// Initialize on load
-loadInitialConfig();
+// ==================== Settings ====================
+
+document.getElementById('runAtStartup').addEventListener('change', (e) => {
+  currentConfig.runAtStartup = e.target.checked;
+  window.api.saveConfig({ runAtStartup: e.target.checked });
+});
+
+document.getElementById('minimizeToTray').addEventListener('change', (e) => {
+  currentConfig.minimizeToTray = e.target.checked;
+  window.api.saveConfig({ minimizeToTray: e.target.checked });
+});
+
+document.getElementById('quit-btn').addEventListener('click', () => {
+  window.api.quitApp();
+});
+
+// ==================== Initialize ====================
+
+(async function init() {
+  currentConfig = await window.api.getConfig();
+  if (currentConfig.email) {
+    document.getElementById('login-email').value = currentConfig.email;
+  }
+
+  const session = await window.api.getSession();
+  if (session) {
+    await showAppView(session.email);
+  } else {
+    showLoginView();
+  }
+})();
